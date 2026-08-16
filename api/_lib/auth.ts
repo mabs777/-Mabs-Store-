@@ -29,7 +29,6 @@ export async function parseRequestBody(req: any): Promise<any> {
     return req.body;
   }
 
-  // If body is not pre-parsed by the serverless environment, parse from stream
   return new Promise((resolve) => {
     let raw = '';
     req.on('data', (chunk: any) => {
@@ -73,4 +72,54 @@ export function requireAdminAuth(req: any, res: any): boolean {
   }
 
   return true;
+}
+
+export function extractSubpath(req: any, prefix: string): string {
+  // Check req.query.sub if passed via rewrite
+  if (req.query?.sub) {
+    const sub = Array.isArray(req.query.sub) ? req.query.sub.join('/') : req.query.sub;
+    return sub.replace(/^\/+|\/+$/g, '');
+  }
+
+  const url = req.url || '';
+  try {
+    const parsed = new URL(url, 'http://localhost');
+    const subParam = parsed.searchParams.get('sub');
+    if (subParam) {
+      return subParam.replace(/^\/+|\/+$/g, '');
+    }
+    const pathname = parsed.pathname;
+    const cleaned = pathname.replace(new RegExp(`^${prefix}`), '');
+    return cleaned.replace(/^\/+|\/+$/g, '');
+  } catch {
+    const pathname = url.split('?')[0];
+    const cleaned = pathname.replace(new RegExp(`^${prefix}`), '');
+    return cleaned.replace(/^\/+|\/+$/g, '');
+  }
+}
+
+export function getQueryParams(req: any): Record<string, string | undefined> {
+  const params: Record<string, string | undefined> = {};
+  if (req.query && typeof req.query === 'object') {
+    for (const [key, value] of Object.entries(req.query)) {
+      if (typeof value === 'string') {
+        params[key] = value;
+      } else if (Array.isArray(value)) {
+        params[key] = value[0];
+      }
+    }
+  }
+  if (req.url && req.url.includes('?')) {
+    try {
+      const parsed = new URL(req.url, 'http://localhost');
+      parsed.searchParams.forEach((val, key) => {
+        if (!params[key]) {
+          params[key] = val;
+        }
+      });
+    } catch {
+      // ignore
+    }
+  }
+  return params;
 }

@@ -2,8 +2,44 @@
   "framework": "vite",
   "rewrites": [
     {
-      "source": "/api/(.*)",
-      "destination": "/api/$1"
+      "source": "/api/auth/:path*",
+      "destination": "/api/auth?sub=:path*"
+    },
+    {
+      "source": "/api/auth",
+      "destination": "/api/auth"
+    },
+    {
+      "source": "/api/admin/:path*",
+      "destination": "/api/admin?sub=:path*"
+    },
+    {
+      "source": "/api/admin",
+      "destination": "/api/admin"
+    },
+    {
+      "source": "/api/apps/:path*",
+      "destination": "/api/apps?sub=:path*"
+    },
+    {
+      "source": "/api/apps",
+      "destination": "/api/apps"
+    },
+    {
+      "source": "/api/categories/:path*",
+      "destination": "/api/categories?sub=:path*"
+    },
+    {
+      "source": "/api/categories",
+      "destination": "/api/categories"
+    },
+    {
+      "source": "/api/stats",
+      "destination": "/api/stats"
+    },
+    {
+      "source": "/api/health",
+      "destination": "/api/health"
     },
     {
       "source": "/(.*)",
