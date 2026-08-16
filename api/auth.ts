@@ -27,7 +27,7 @@ export default async function handler(req: any, res: any) {
         return;
       }
 
-      const isValid = db.verifyAdminPassword(password);
+      const isValid = await db.verifyAdminPassword(password);
       if (!isValid) {
         res.status(401).json({ success: false, error: 'Invalid admin credentials.' });
         return;

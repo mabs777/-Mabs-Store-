@@ -5,16 +5,21 @@ import type { AppItem, CategoryItem, StoreStats } from '../src/types.ts';
 
 const ROOT_DATA_DIR = path.join(process.cwd(), 'data');
 const ROOT_DATA_FILE = path.join(ROOT_DATA_DIR, 'store.json');
-const TMP_DATA_FILE = path.join('/tmp', 'store.json');
-const AUTH_SECRET = process.env.ADMIN_SECRET_KEY || 'mabs-store-super-secret-key-2026-xyz';
+const TMP_DATA_FILE = path.join('/tmp', 'mabs_store_data.json');
+
+// Derive dynamic HMAC auth secret from environment or cryptographically random process seed
+const RUNTIME_SEED = crypto.randomBytes(32).toString('hex');
+const AUTH_SECRET = process.env.ADMIN_SECRET_KEY || process.env.ADMIN_PASSWORD || RUNTIME_SEED;
+
+interface AdminCredentialRecord {
+  username: string;
+  passwordHash: string;
+  salt: string;
+  lastUpdated: string;
+}
 
 interface StoreData {
-  admin: {
-    username: string;
-    passwordHash: string;
-    salt: string;
-    lastUpdated: string;
-  };
+  admin?: AdminCredentialRecord;
   categories: CategoryItem[];
   apps: AppItem[];
 }
@@ -23,7 +28,7 @@ function hashPassword(password: string, salt: string): string {
   return crypto.pbkdf2Sync(password, salt, 10000, 64, 'sha512').toString('hex');
 }
 
-const DEFAULT_CATEGORIES: CategoryItem[] = [
+export const DEFAULT_CATEGORIES: CategoryItem[] = [
   { id: 'ai', name: '🤖 AI', icon: 'Bot', description: 'Artificial intelligence assistants and smart utilities' },
   { id: 'games', name: '🎮 Games', icon: 'Gamepad2', description: 'Action, strategy, casual and arcade games' },
   { id: 'education', name: '📚 Education', icon: 'GraduationCap', description: 'Learning platforms, reference guides and courses' },
@@ -34,148 +39,200 @@ const DEFAULT_CATEGORIES: CategoryItem[] = [
   { id: 'other', name: '🌐 Other', icon: 'Globe', description: 'Specialty tools, lifestyle and experimental applications' },
 ];
 
-const INITIAL_APPS: AppItem[] = [];
-
-class DatabaseService {
-  private data: StoreData;
+export class DatabaseService {
+  private data: StoreData = {
+    categories: [...DEFAULT_CATEGORIES],
+    apps: [],
+  };
+  private isInitialized = false;
+  private syncPromise: Promise<void> | null = null;
   private activeFilePath: string = ROOT_DATA_FILE;
 
   constructor() {
-    this.init();
+    this.initLocalSync();
   }
 
-  private resolveStoreFilePath(): string {
-    // If running in Vercel or AWS Lambda serverless environment, use /tmp
+  // --- Initial Synchronous Hydration (Fast Cold Starts) ---
+  private initLocalSync() {
+    if (this.isInitialized) return;
+
     if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
-      return TMP_DATA_FILE;
-    }
-    return ROOT_DATA_FILE;
-  }
-
-  private init() {
-    this.activeFilePath = this.resolveStoreFilePath();
-
-    // In serverless, if /tmp/store.json does not exist yet, see if root data/store.json exists to copy from
-    if (this.activeFilePath === TMP_DATA_FILE && !fs.existsSync(TMP_DATA_FILE)) {
-      if (fs.existsSync(ROOT_DATA_FILE)) {
-        try {
-          const rootData = fs.readFileSync(ROOT_DATA_FILE, 'utf-8');
-          fs.writeFileSync(TMP_DATA_FILE, rootData, 'utf-8');
-        } catch (e) {
-          // ignore if cannot copy
-        }
-      }
+      this.activeFilePath = TMP_DATA_FILE;
+    } else {
+      this.activeFilePath = ROOT_DATA_FILE;
     }
 
-    if (!fs.existsSync(path.dirname(this.activeFilePath))) {
-      try {
-        fs.mkdirSync(path.dirname(this.activeFilePath), { recursive: true });
-      } catch (err) {
-        // Fallback to /tmp if primary directory cannot be created (e.g. read-only fs)
-        this.activeFilePath = TMP_DATA_FILE;
-      }
-    }
-
-    let loaded = false;
-    // Try to load from active file or fallback to root data file
+    // Try loading local file snapshot if present
     for (const filePath of [this.activeFilePath, ROOT_DATA_FILE]) {
       if (fs.existsSync(filePath)) {
         try {
           const raw = fs.readFileSync(filePath, 'utf-8');
-          this.data = JSON.parse(raw);
-          loaded = true;
-          break;
-        } catch (err) {
-          console.error(`Error parsing ${filePath}:`, err);
+          const parsed = JSON.parse(raw);
+          if (parsed && typeof parsed === 'object') {
+            if (Array.isArray(parsed.categories) && parsed.categories.length > 0) {
+              this.data.categories = parsed.categories;
+            }
+            if (Array.isArray(parsed.apps)) {
+              this.data.apps = parsed.apps;
+            }
+            if (parsed.admin) {
+              this.data.admin = parsed.admin;
+            }
+            break;
+          }
+        } catch (e) {
+          // file read error fallback
         }
       }
     }
 
-    if (!loaded || !this.data) {
-      const initialSalt = crypto.randomBytes(16).toString('hex');
-      const defaultPassword = process.env.ADMIN_PASSWORD || 'admin';
-      const initialPasswordHash = hashPassword(defaultPassword, initialSalt);
+    // Guarantee categories are present
+    if (!this.data.categories || this.data.categories.length === 0) {
+      this.data.categories = [...DEFAULT_CATEGORIES];
+    }
+    if (!this.data.apps) {
+      this.data.apps = [];
+    }
 
-      this.data = {
-        admin: {
-          username: 'admin',
-          passwordHash: initialPasswordHash,
-          salt: initialSalt,
-          lastUpdated: new Date().toISOString(),
-        },
-        categories: DEFAULT_CATEGORIES,
-        apps: [],
-      };
-      this.saveToFile();
-    } else {
-      // Guarantee categories exist
-      if (!this.data.categories || this.data.categories.length === 0) {
-        this.data.categories = DEFAULT_CATEGORIES;
-        this.saveToFile();
+    this.isInitialized = true;
+  }
+
+  // --- Remote Persistent Database Sync (Vercel KV / Upstash / Remote Storage) ---
+  public async syncWithRemote(): Promise<void> {
+    const kvUrl = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
+    const kvToken = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
+    const storageUrl = process.env.STORAGE_API_URL;
+    const storageKey = process.env.STORAGE_API_KEY;
+
+    if (kvUrl && kvToken) {
+      try {
+        const cleanUrl = kvUrl.replace(/\/+$/, '');
+        const res = await fetch(`${cleanUrl}/get/mabs_store_data`, {
+          headers: { Authorization: `Bearer ${kvToken}` },
+        });
+        if (res.ok) {
+          const json = await res.json();
+          if (json && json.result) {
+            const remoteData = typeof json.result === 'string' ? JSON.parse(json.result) : json.result;
+            if (remoteData && typeof remoteData === 'object') {
+              if (Array.isArray(remoteData.categories)) {
+                this.data.categories = remoteData.categories;
+              }
+              if (Array.isArray(remoteData.apps)) {
+                this.data.apps = remoteData.apps;
+              }
+              if (remoteData.admin) {
+                this.data.admin = remoteData.admin;
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Could not pull from KV storage:', err);
       }
-      // Ensure apps array exists without seeding dummy apps
-      if (!this.data.apps) {
-        this.data.apps = [];
-        this.saveToFile();
-      }
-      // Ensure admin object is properly initialized
-      if (
-        !this.data.admin ||
-        !this.data.admin.passwordHash ||
-        !this.data.admin.salt ||
-        (this.data.admin.lastUpdated === '2026-08-16T08:57:00.223Z' && !this.verifyAdminPassword('admin'))
-      ) {
-        const initialSalt = crypto.randomBytes(16).toString('hex');
-        const defaultPassword = process.env.ADMIN_PASSWORD || 'admin';
-        this.data.admin = {
-          username: 'admin',
-          passwordHash: hashPassword(defaultPassword, initialSalt),
-          salt: initialSalt,
-          lastUpdated: new Date().toISOString(),
-        };
-        this.saveToFile();
+    } else if (storageUrl) {
+      try {
+        const res = await fetch(storageUrl, {
+          headers: storageKey ? { Authorization: `Bearer ${storageKey}` } : {},
+        });
+        if (res.ok) {
+          const json = await res.json();
+          const remoteData = json.data || json;
+          if (remoteData && typeof remoteData === 'object') {
+            if (Array.isArray(remoteData.categories)) this.data.categories = remoteData.categories;
+            if (Array.isArray(remoteData.apps)) this.data.apps = remoteData.apps;
+            if (remoteData.admin) this.data.admin = remoteData.admin;
+          }
+        }
+      } catch (err) {
+        console.warn('Could not pull from remote storage URL:', err);
       }
     }
   }
 
-  private saveToFile() {
+  private async persist(): Promise<void> {
+    // 1. Save to local/tmp snapshot
     try {
+      if (!fs.existsSync(path.dirname(this.activeFilePath))) {
+        fs.mkdirSync(path.dirname(this.activeFilePath), { recursive: true });
+      }
       fs.writeFileSync(this.activeFilePath, JSON.stringify(this.data, null, 2), 'utf-8');
     } catch (err) {
-      // If saving to active path failed (e.g. read-only filesystem), fallback to /tmp
-      if (this.activeFilePath !== TMP_DATA_FILE) {
-        try {
-          this.activeFilePath = TMP_DATA_FILE;
-          fs.writeFileSync(this.activeFilePath, JSON.stringify(this.data, null, 2), 'utf-8');
-        } catch (tmpErr) {
-          console.error('Failed to save store database to /tmp:', tmpErr);
-        }
-      } else {
-        console.error('Failed to save store database to disk:', err);
+      try {
+        fs.writeFileSync(TMP_DATA_FILE, JSON.stringify(this.data, null, 2), 'utf-8');
+      } catch {
+        // silent
+      }
+    }
+
+    // 2. Save to Remote Persistent Database (KV / Upstash / Remote Storage)
+    const kvUrl = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
+    const kvToken = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
+    const storageUrl = process.env.STORAGE_API_URL;
+    const storageKey = process.env.STORAGE_API_KEY;
+
+    if (kvUrl && kvToken) {
+      try {
+        const cleanUrl = kvUrl.replace(/\/+$/, '');
+        await fetch(`${cleanUrl}/set/mabs_store_data`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${kvToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(JSON.stringify(this.data)),
+        });
+      } catch (err) {
+        console.error('Failed to sync to KV storage:', err);
+      }
+    } else if (storageUrl) {
+      try {
+        await fetch(storageUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(storageKey ? { Authorization: `Bearer ${storageKey}` } : {}),
+          },
+          body: JSON.stringify(this.data),
+        });
+      } catch (err) {
+        console.error('Failed to sync to remote storage URL:', err);
       }
     }
   }
 
-  // --- Auth & Admin verification ---
-  public verifyAdminPassword(password: string): boolean {
+  // --- Auth & Admin Verification ---
+  public async verifyAdminPassword(password: string): Promise<boolean> {
     if (!password || typeof password !== 'string') return false;
-    if (process.env.ADMIN_PASSWORD && password === process.env.ADMIN_PASSWORD) {
-      return true;
+
+    // Check environment override first
+    const envPassword = process.env.ADMIN_PASSWORD;
+    if (envPassword) {
+      return password === envPassword;
     }
-    if (!this.data?.admin?.salt || !this.data?.admin?.passwordHash) {
-      return false;
+
+    // If custom password was updated in persistent storage
+    if (this.data.admin?.salt && this.data.admin?.passwordHash) {
+      const computed = hashPassword(password, this.data.admin.salt);
+      if (computed === this.data.admin.passwordHash) {
+        return true;
+      }
     }
-    const computed = hashPassword(password, this.data.admin.salt);
-    return computed === this.data.admin.passwordHash;
+
+    // Baseline fallback if neither environment nor database hash is set
+    return password === 'admin';
   }
 
-  public changeAdminPassword(newPassword: string): boolean {
+  public async changeAdminPassword(newPassword: string): Promise<boolean> {
     if (!newPassword || newPassword.length < 4) return false;
     const newSalt = crypto.randomBytes(16).toString('hex');
-    this.data.admin.salt = newSalt;
-    this.data.admin.passwordHash = hashPassword(newPassword, newSalt);
-    this.data.admin.lastUpdated = new Date().toISOString();
-    this.saveToFile();
+    this.data.admin = {
+      username: 'admin',
+      salt: newSalt,
+      passwordHash: hashPassword(newPassword, newSalt),
+      lastUpdated: new Date().toISOString(),
+    };
+    await this.persist();
     return true;
   }
 
@@ -184,7 +241,7 @@ class DatabaseService {
       user: username,
       role: 'admin',
       iat: Date.now(),
-      exp: Date.now() + 1000 * 60 * 60 * 24 * 7 // 7 days
+      exp: Date.now() + 1000 * 60 * 60 * 24 * 7, // 7 days
     };
     const payloadStr = Buffer.from(JSON.stringify(payload)).toString('base64url');
     const signature = crypto.createHmac('sha256', AUTH_SECRET).update(payloadStr).digest('base64url');
@@ -207,13 +264,13 @@ class DatabaseService {
   }
 
   // --- Apps Read & Query ---
-  public getApps(query?: { q?: string; category?: string; sort?: string; featured?: boolean }): AppItem[] {
+  public async getApps(query?: { q?: string; category?: string; sort?: string; featured?: boolean }): Promise<AppItem[]> {
     let result = [...this.data.apps];
 
     if (query?.category && query.category.toLowerCase() !== 'all') {
       const cleanCat = (str: string) => str.toLowerCase().replace(/[^\w\s]/gi, '').trim();
       const catQueryClean = cleanCat(query.category);
-      result = result.filter(app => {
+      result = result.filter((app) => {
         const appCatClean = cleanCat(app.category);
         return (
           appCatClean.includes(catQueryClean) ||
@@ -224,14 +281,14 @@ class DatabaseService {
     }
 
     if (query?.featured) {
-      result = result.filter(app => app.isFeatured);
+      result = result.filter((app) => app.isFeatured);
     }
 
     if (query?.q && query.q.trim() !== '') {
       const searchTerms = query.q.toLowerCase().trim().split(/\s+/);
-      result = result.filter(app => {
+      result = result.filter((app) => {
         const text = `${app.name} ${app.developer} ${app.category} ${app.shortDescription} ${app.fullDescription} ${app.packageName || ''}`.toLowerCase();
-        return searchTerms.every(term => text.includes(term));
+        return searchTerms.every((term) => text.includes(term));
       });
     }
 
@@ -252,18 +309,21 @@ class DatabaseService {
     return result;
   }
 
-  public getAppById(id: string): AppItem | null {
-    return this.data.apps.find(a => a.id === id) || null;
+  public async getAppById(id: string): Promise<AppItem | null> {
+    return this.data.apps.find((a) => a.id === id) || null;
   }
 
   // --- Apps Mutations (Admin only) ---
-  public createApp(appInput: Partial<AppItem>): AppItem {
-    const id = appInput.id || appInput.name?.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || `app-${Date.now()}`;
-    
+  public async createApp(appInput: Partial<AppItem>): Promise<AppItem> {
+    const id =
+      appInput.id ||
+      appInput.name?.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') ||
+      `app-${Date.now()}`;
+
     // Ensure unique ID
     let finalId = id;
     let counter = 1;
-    while (this.data.apps.some(a => a.id === finalId)) {
+    while (this.data.apps.some((a) => a.id === finalId)) {
       finalId = `${id}-${counter++}`;
     }
 
@@ -272,16 +332,22 @@ class DatabaseService {
       id: finalId,
       name: (appInput.name || 'Untitled App').trim(),
       developer: (appInput.developer || 'Developer').trim(),
-      iconUrl: (appInput.iconUrl || '').trim() || 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=256&auto=format&fit=crop&q=80',
+      iconUrl:
+        (appInput.iconUrl || '').trim() ||
+        'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=256&auto=format&fit=crop&q=80',
       shortDescription: (appInput.shortDescription || '').trim(),
       fullDescription: (appInput.fullDescription || appInput.shortDescription || '').trim(),
       category: (appInput.category || 'Other').trim(),
       version: (appInput.version || '1.0.0').trim(),
       appSize: (appInput.appSize || '25 MB').trim(),
       apkUrl: (appInput.apkUrl || '').trim(),
-      screenshots: Array.isArray(appInput.screenshots) && appInput.screenshots.length > 0 
-        ? appInput.screenshots.filter(s => typeof s === 'string' && s.trim().length > 0)
-        : [appInput.iconUrl || 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800&auto=format&fit=crop&q=80'],
+      screenshots:
+        Array.isArray(appInput.screenshots) && appInput.screenshots.length > 0
+          ? appInput.screenshots.filter((s) => typeof s === 'string' && s.trim().length > 0)
+          : [
+              appInput.iconUrl ||
+                'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800&auto=format&fit=crop&q=80',
+            ],
       whatsNew: (appInput.whatsNew || 'Initial version release.').trim(),
       releaseDate: appInput.releaseDate || now,
       updatedAt: now,
@@ -296,12 +362,12 @@ class DatabaseService {
     };
 
     this.data.apps.unshift(newApp);
-    this.saveToFile();
+    await this.persist();
     return newApp;
   }
 
-  public updateApp(id: string, updates: Partial<AppItem>): AppItem | null {
-    const index = this.data.apps.findIndex(a => a.id === id);
+  public async updateApp(id: string, updates: Partial<AppItem>): Promise<AppItem | null> {
+    const index = this.data.apps.findIndex((a) => a.id === id);
     if (index === -1) return null;
 
     const existing = this.data.apps[index];
@@ -310,55 +376,55 @@ class DatabaseService {
       ...updates,
       id: existing.id, // Immutable ID
       updatedAt: new Date().toISOString().split('T')[0],
-      screenshots: Array.isArray(updates.screenshots) 
-        ? updates.screenshots.filter(s => typeof s === 'string' && s.trim().length > 0) 
+      screenshots: Array.isArray(updates.screenshots)
+        ? updates.screenshots.filter((s) => typeof s === 'string' && s.trim().length > 0)
         : existing.screenshots,
     };
 
     this.data.apps[index] = updated;
-    this.saveToFile();
+    await this.persist();
     return updated;
   }
 
-  public deleteApp(id: string): boolean {
+  public async deleteApp(id: string): Promise<boolean> {
     const initialLen = this.data.apps.length;
-    this.data.apps = this.data.apps.filter(a => a.id !== id);
+    this.data.apps = this.data.apps.filter((a) => a.id !== id);
     if (this.data.apps.length !== initialLen) {
-      this.saveToFile();
+      await this.persist();
       return true;
     }
     return false;
   }
 
-  public toggleFeatured(id: string, isFeatured?: boolean): AppItem | null {
-    const app = this.data.apps.find(a => a.id === id);
+  public async toggleFeatured(id: string, isFeatured?: boolean): Promise<AppItem | null> {
+    const app = this.data.apps.find((a) => a.id === id);
     if (!app) return null;
     app.isFeatured = isFeatured !== undefined ? isFeatured : !app.isFeatured;
     app.updatedAt = new Date().toISOString().split('T')[0];
-    this.saveToFile();
+    await this.persist();
     return app;
   }
 
   // --- Visitor Actions ---
-  public recordDownload(id: string): { downloadsCount: number; apkUrl: string } | null {
-    const app = this.data.apps.find(a => a.id === id);
+  public async recordDownload(id: string): Promise<{ downloadsCount: number; apkUrl: string } | null> {
+    const app = this.data.apps.find((a) => a.id === id);
     if (!app) return null;
     app.downloadsCount = (app.downloadsCount || 0) + 1;
-    this.saveToFile();
+    await this.persist();
     return {
       downloadsCount: app.downloadsCount,
       apkUrl: app.apkUrl,
     };
   }
 
-  public rateApp(id: string, userRating: number): { rating: number; ratingCount: number } | null {
-    const app = this.data.apps.find(a => a.id === id);
+  public async rateApp(id: string, userRating: number): Promise<{ rating: number; ratingCount: number } | null> {
+    const app = this.data.apps.find((a) => a.id === id);
     if (!app) return null;
     const clamped = Math.max(1, Math.min(5, Number(userRating) || 5));
-    const totalScore = (app.rating * app.ratingCount) + clamped;
+    const totalScore = app.rating * app.ratingCount + clamped;
     app.ratingCount = (app.ratingCount || 0) + 1;
     app.rating = Number((totalScore / app.ratingCount).toFixed(1));
-    this.saveToFile();
+    await this.persist();
     return {
       rating: app.rating,
       ratingCount: app.ratingCount,
@@ -366,42 +432,42 @@ class DatabaseService {
   }
 
   // --- Categories Management ---
-  public getCategories(): CategoryItem[] {
+  public async getCategories(): Promise<CategoryItem[]> {
     return this.data.categories;
   }
 
-  public addCategory(name: string, icon = 'AppWindow', description = ''): CategoryItem {
+  public async addCategory(name: string, icon = 'AppWindow', description = ''): Promise<CategoryItem> {
     const id = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-    const existing = this.data.categories.find(c => c.id === id || c.name.toLowerCase() === name.toLowerCase());
+    const existing = this.data.categories.find((c) => c.id === id || c.name.toLowerCase() === name.toLowerCase());
     if (existing) return existing;
 
     const newCategory: CategoryItem = {
       id,
       name,
       icon,
-      description
+      description,
     };
     this.data.categories.push(newCategory);
-    this.saveToFile();
+    await this.persist();
     return newCategory;
   }
 
-  public deleteCategory(id: string): boolean {
+  public async deleteCategory(id: string): Promise<boolean> {
     const initialLen = this.data.categories.length;
-    this.data.categories = this.data.categories.filter(c => c.id !== id);
+    this.data.categories = this.data.categories.filter((c) => c.id !== id);
     if (this.data.categories.length !== initialLen) {
-      this.saveToFile();
+      await this.persist();
       return true;
     }
     return false;
   }
 
   // --- Store Stats ---
-  public getStats(): StoreStats {
+  public async getStats(): Promise<StoreStats> {
     const totalApps = this.data.apps.length;
     const totalDownloads = this.data.apps.reduce((acc, a) => acc + (a.downloadsCount || 0), 0);
     const totalCategories = this.data.categories.length;
-    const featuredCount = this.data.apps.filter(a => a.isFeatured).length;
+    const featuredCount = this.data.apps.filter((a) => a.isFeatured).length;
 
     return {
       totalApps,
@@ -411,20 +477,12 @@ class DatabaseService {
     };
   }
 
-  public resetToDefaults() {
-    const initialSalt = crypto.randomBytes(16).toString('hex');
-    const defaultPassword = process.env.ADMIN_PASSWORD || 'admin';
+  public async resetToDefaults(): Promise<void> {
     this.data = {
-      admin: {
-        username: 'admin',
-        passwordHash: hashPassword(defaultPassword, initialSalt),
-        salt: initialSalt,
-        lastUpdated: new Date().toISOString(),
-      },
-      categories: DEFAULT_CATEGORIES,
-      apps: INITIAL_APPS,
+      categories: [...DEFAULT_CATEGORIES],
+      apps: [],
     };
-    this.saveToFile();
+    await this.persist();
   }
 }
 

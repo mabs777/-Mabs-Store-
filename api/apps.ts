@@ -21,7 +21,7 @@ export default async function handler(req: any, res: any) {
       }
       const queryParams = getQueryParams(req);
       const { q, category, sort, featured } = queryParams;
-      const apps = db.getApps({
+      const apps = await db.getApps({
         q: typeof q === 'string' ? q : undefined,
         category: typeof category === 'string' ? category : undefined,
         sort: typeof sort === 'string' ? sort : undefined,
@@ -39,7 +39,7 @@ export default async function handler(req: any, res: any) {
         res.status(405).json({ success: false, error: 'Method Not Allowed' });
         return;
       }
-      const result = db.recordDownload(appId);
+      const result = await db.recordDownload(appId);
       if (!result) {
         res.status(404).json({ success: false, error: 'App not found.' });
         return;
@@ -56,7 +56,7 @@ export default async function handler(req: any, res: any) {
       }
       const body = await parseRequestBody(req);
       const { rating } = body || {};
-      const result = db.rateApp(appId, Number(rating));
+      const result = await db.rateApp(appId, Number(rating));
       if (!result) {
         res.status(404).json({ success: false, error: 'App not found.' });
         return;
@@ -71,7 +71,7 @@ export default async function handler(req: any, res: any) {
         res.status(405).json({ success: false, error: 'Method Not Allowed' });
         return;
       }
-      const appItem = db.getAppById(appId);
+      const appItem = await db.getAppById(appId);
       if (!appItem) {
         res.status(404).json({ success: false, error: 'App not found in Mabs Store catalogue.' });
         return;

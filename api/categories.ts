@@ -15,7 +15,7 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
-    const categories = db.getCategories();
+    const categories = await db.getCategories();
     res.status(200).json({ success: true, data: categories });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message || 'Internal server error' });

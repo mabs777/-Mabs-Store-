@@ -15,7 +15,7 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
-    const stats = db.getStats();
+    const stats = await db.getStats();
     res.status(200).json({ success: true, data: stats });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message || 'Internal server error' });

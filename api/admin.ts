@@ -34,13 +34,13 @@ export default async function handler(req: any, res: any) {
         return;
       }
 
-      const isCurrentValid = db.verifyAdminPassword(currentPassword);
+      const isCurrentValid = await db.verifyAdminPassword(currentPassword);
       if (!isCurrentValid) {
         res.status(400).json({ success: false, error: 'Current password does not match.' });
         return;
       }
 
-      const changed = db.changeAdminPassword(newPassword);
+      const changed = await db.changeAdminPassword(newPassword);
       if (changed) {
         res.status(200).json({ success: true, message: 'Admin password changed successfully!' });
       } else {
@@ -55,7 +55,7 @@ export default async function handler(req: any, res: any) {
         res.status(405).json({ success: false, error: 'Method Not Allowed' });
         return;
       }
-      db.resetToDefaults();
+      await db.resetToDefaults();
       res.status(200).json({ success: true, message: 'Store database reset to initial catalogue.' });
       return;
     }
@@ -84,7 +84,7 @@ export default async function handler(req: any, res: any) {
           return;
         }
 
-        const created = db.createApp(body);
+        const created = await db.createApp(body);
         res.status(201).json({ success: true, data: created, message: 'App successfully published to Mabs Store!' });
         return;
       }
@@ -99,7 +99,7 @@ export default async function handler(req: any, res: any) {
       if (parts[2] === 'featured' && (req.method === 'PATCH' || req.method === 'POST')) {
         const body = await parseRequestBody(req);
         const { isFeatured } = body || {};
-        const updated = db.toggleFeatured(appId, isFeatured);
+        const updated = await db.toggleFeatured(appId, isFeatured);
         if (!updated) {
           res.status(404).json({ success: false, error: 'App not found.' });
           return;
@@ -130,7 +130,7 @@ export default async function handler(req: any, res: any) {
           return;
         }
 
-        const updated = db.updateApp(appId, body);
+        const updated = await db.updateApp(appId, body);
         if (!updated) {
           res.status(404).json({ success: false, error: 'App not found for update.' });
           return;
@@ -141,7 +141,7 @@ export default async function handler(req: any, res: any) {
 
       // DELETE /api/admin/apps/:id
       if (parts.length === 2 && req.method === 'DELETE') {
-        const success = db.deleteApp(appId);
+        const success = await db.deleteApp(appId);
         if (!success) {
           res.status(404).json({ success: false, error: 'App not found to delete.' });
           return;
@@ -161,7 +161,7 @@ export default async function handler(req: any, res: any) {
           res.status(400).json({ success: false, error: 'Category name is required.' });
           return;
         }
-        const category = db.addCategory(name.trim(), icon, description);
+        const category = await db.addCategory(name.trim(), icon, description);
         res.status(201).json({ success: true, data: category, message: 'Category added successfully.' });
         return;
       }
@@ -169,7 +169,7 @@ export default async function handler(req: any, res: any) {
       // DELETE /api/admin/categories/:id
       if (parts.length === 2 && req.method === 'DELETE') {
         const catId = decodeURIComponent(parts[1]);
-        const deleted = db.deleteCategory(catId);
+        const deleted = await db.deleteCategory(catId);
         if (!deleted) {
           res.status(404).json({ success: false, error: 'Category not found.' });
           return;

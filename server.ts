@@ -10,13 +10,7 @@ async function startServer() {
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-  // Request logger for API calls
-  app.use('/api', (req, res, next) => {
-    // API request handling
-    next();
-  });
-
-  // Authentication Middleware for Admin routes
+  // Middleware for Admin authentication
   const requireAdmin = (req: express.Request, res: express.Response, next: express.NextFunction) => {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -44,9 +38,9 @@ async function startServer() {
   });
 
   // Get Store Stats
-  app.get('/api/stats', (req, res) => {
+  app.get('/api/stats', async (req, res) => {
     try {
-      const stats = db.getStats();
+      const stats = await db.getStats();
       res.json({ success: true, data: stats });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
@@ -54,9 +48,9 @@ async function startServer() {
   });
 
   // Get Categories
-  app.get('/api/categories', (req, res) => {
+  app.get('/api/categories', async (req, res) => {
     try {
-      const categories = db.getCategories();
+      const categories = await db.getCategories();
       res.json({ success: true, data: categories });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
@@ -64,10 +58,10 @@ async function startServer() {
   });
 
   // Get Apps (with search, category filter, sorting, featured filter)
-  app.get('/api/apps', (req, res) => {
+  app.get('/api/apps', async (req, res) => {
     try {
       const { q, category, sort, featured } = req.query;
-      const apps = db.getApps({
+      const apps = await db.getApps({
         q: typeof q === 'string' ? q : undefined,
         category: typeof category === 'string' ? category : undefined,
         sort: typeof sort === 'string' ? sort : undefined,
@@ -80,9 +74,9 @@ async function startServer() {
   });
 
   // Get Single App details
-  app.get('/api/apps/:id', (req, res) => {
+  app.get('/api/apps/:id', async (req, res) => {
     try {
-      const appItem = db.getAppById(req.params.id);
+      const appItem = await db.getAppById(req.params.id);
       if (!appItem) {
         res.status(404).json({ success: false, error: 'App not found in Mabs Store catalogue.' });
         return;
@@ -94,9 +88,9 @@ async function startServer() {
   });
 
   // Track APK Download & Return download info
-  app.post('/api/apps/:id/download', (req, res) => {
+  app.post('/api/apps/:id/download', async (req, res) => {
     try {
-      const result = db.recordDownload(req.params.id);
+      const result = await db.recordDownload(req.params.id);
       if (!result) {
         res.status(404).json({ success: false, error: 'App not found.' });
         return;
@@ -108,10 +102,10 @@ async function startServer() {
   });
 
   // Rate an App (Visitor)
-  app.post('/api/apps/:id/rate', (req, res) => {
+  app.post('/api/apps/:id/rate', async (req, res) => {
     try {
       const { rating } = req.body;
-      const result = db.rateApp(req.params.id, Number(rating));
+      const result = await db.rateApp(req.params.id, Number(rating));
       if (!result) {
         res.status(404).json({ success: false, error: 'App not found.' });
         return;
@@ -127,7 +121,7 @@ async function startServer() {
   // ==========================================
 
   // Admin Login
-  app.post('/api/auth/login', (req, res) => {
+  app.post('/api/auth/login', async (req, res) => {
     try {
       const { password, username = 'admin' } = req.body;
       if (!password) {
@@ -135,7 +129,7 @@ async function startServer() {
         return;
       }
 
-      const isValid = db.verifyAdminPassword(password);
+      const isValid = await db.verifyAdminPassword(password);
       if (!isValid) {
         res.status(401).json({ success: false, error: 'Invalid admin credentials.' });
         return;
@@ -175,9 +169,9 @@ async function startServer() {
   // ==========================================
 
   // Create App
-  app.post('/api/admin/apps', requireAdmin, (req, res) => {
+  app.post('/api/admin/apps', requireAdmin, async (req, res) => {
     try {
-      const { name, developer, category, version, appSize, apkUrl } = req.body;
+      const { name, developer, category, apkUrl } = req.body;
 
       if (!name || !name.trim()) {
         res.status(400).json({ success: false, error: 'App Name is required.' });
@@ -196,7 +190,7 @@ async function startServer() {
         return;
       }
 
-      const created = db.createApp(req.body);
+      const created = await db.createApp(req.body);
       res.status(201).json({ success: true, data: created, message: 'App successfully published to Mabs Store!' });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
@@ -204,9 +198,9 @@ async function startServer() {
   });
 
   // Update App
-  app.put('/api/admin/apps/:id', requireAdmin, (req, res) => {
+  app.put('/api/admin/apps/:id', requireAdmin, async (req, res) => {
     try {
-      const { name, developer, category, apkUrl } = req.body;
+      const { name, developer, apkUrl } = req.body;
 
       if (name !== undefined && !name.trim()) {
         res.status(400).json({ success: false, error: 'App Name cannot be empty.' });
@@ -221,7 +215,7 @@ async function startServer() {
         return;
       }
 
-      const updated = db.updateApp(req.params.id, req.body);
+      const updated = await db.updateApp(req.params.id, req.body);
       if (!updated) {
         res.status(404).json({ success: false, error: 'App not found for update.' });
         return;
@@ -234,9 +228,9 @@ async function startServer() {
   });
 
   // Delete App
-  app.delete('/api/admin/apps/:id', requireAdmin, (req, res) => {
+  app.delete('/api/admin/apps/:id', requireAdmin, async (req, res) => {
     try {
-      const success = db.deleteApp(req.params.id);
+      const success = await db.deleteApp(req.params.id);
       if (!success) {
         res.status(404).json({ success: false, error: 'App not found to delete.' });
         return;
@@ -248,10 +242,10 @@ async function startServer() {
   });
 
   // Toggle Featured status
-  app.patch('/api/admin/apps/:id/featured', requireAdmin, (req, res) => {
+  app.patch('/api/admin/apps/:id/featured', requireAdmin, async (req, res) => {
     try {
       const { isFeatured } = req.body;
-      const updated = db.toggleFeatured(req.params.id, isFeatured);
+      const updated = await db.toggleFeatured(req.params.id, isFeatured);
       if (!updated) {
         res.status(404).json({ success: false, error: 'App not found.' });
         return;
@@ -263,14 +257,14 @@ async function startServer() {
   });
 
   // Add Category
-  app.post('/api/admin/categories', requireAdmin, (req, res) => {
+  app.post('/api/admin/categories', requireAdmin, async (req, res) => {
     try {
       const { name, icon, description } = req.body;
       if (!name || !name.trim()) {
         res.status(400).json({ success: false, error: 'Category name is required.' });
         return;
       }
-      const category = db.addCategory(name.trim(), icon, description);
+      const category = await db.addCategory(name.trim(), icon, description);
       res.status(201).json({ success: true, data: category, message: 'Category added successfully.' });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
@@ -278,9 +272,9 @@ async function startServer() {
   });
 
   // Delete Category
-  app.delete('/api/admin/categories/:id', requireAdmin, (req, res) => {
+  app.delete('/api/admin/categories/:id', requireAdmin, async (req, res) => {
     try {
-      const deleted = db.deleteCategory(req.params.id);
+      const deleted = await db.deleteCategory(req.params.id);
       if (!deleted) {
         res.status(404).json({ success: false, error: 'Category not found.' });
         return;
@@ -292,7 +286,7 @@ async function startServer() {
   });
 
   // Change Admin Password
-  app.post('/api/admin/change-password', requireAdmin, (req, res) => {
+  app.post('/api/admin/change-password', requireAdmin, async (req, res) => {
     try {
       const { currentPassword, newPassword } = req.body;
       if (!currentPassword || !newPassword) {
@@ -305,13 +299,13 @@ async function startServer() {
         return;
       }
 
-      const isCurrentValid = db.verifyAdminPassword(currentPassword);
+      const isCurrentValid = await db.verifyAdminPassword(currentPassword);
       if (!isCurrentValid) {
         res.status(400).json({ success: false, error: 'Current password does not match.' });
         return;
       }
 
-      const changed = db.changeAdminPassword(newPassword);
+      const changed = await db.changeAdminPassword(newPassword);
       if (changed) {
         res.json({ success: true, message: 'Admin password changed successfully!' });
       } else {
@@ -323,9 +317,9 @@ async function startServer() {
   });
 
   // Reset Demo Data
-  app.post('/api/admin/reset-data', requireAdmin, (req, res) => {
+  app.post('/api/admin/reset-data', requireAdmin, async (req, res) => {
     try {
-      db.resetToDefaults();
+      await db.resetToDefaults();
       res.json({ success: true, message: 'Store database reset to initial verified catalogue.' });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
