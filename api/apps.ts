@@ -1,5 +1,5 @@
-import { db } from './_lib/db.ts';
-import { parseRequestBody, sendJsonResponse, handleOptions, extractSubpath, getQueryParams } from './_lib/auth.ts';
+import { db } from './_lib/db.js';
+import { parseRequestBody, sendJsonResponse, handleOptions, extractSubpath, getQueryParams } from './_lib/auth.js';
 
 export default async function handler(req: any, res: any) {
   if (handleOptions(req, res)) return;
