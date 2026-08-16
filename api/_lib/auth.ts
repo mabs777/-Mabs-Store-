@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'http';
-import { db } from '../../server/db.ts';
+import { db } from './db.ts';
 
 export interface VercelReq extends IncomingMessage {
   query?: Record<string, string | string[]>;
@@ -11,10 +11,75 @@ export interface VercelReq extends IncomingMessage {
 }
 
 export interface VercelRes extends ServerResponse {
-  status: (statusCode: number) => VercelRes;
-  json: (jsonBody: any) => void;
-  send: (body: any) => void;
+  status?: (statusCode: number) => VercelRes;
+  json?: (jsonBody: any) => void;
+  send?: (body: any) => void;
   setHeader: (name: string, value: string | number | readonly string[]) => this;
+}
+
+export function setCorsHeaders(res: any) {
+  try {
+    if (typeof res.setHeader === 'function') {
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
+      res.setHeader(
+        'Access-Control-Allow-Headers',
+        'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, Authorization'
+      );
+    }
+  } catch (e) {
+    // Non-fatal header error fallback
+  }
+}
+
+export function sendJsonResponse(res: any, statusCode: number, data: any) {
+  setCorsHeaders(res);
+  try {
+    if (typeof res.status === 'function') {
+      res.status(statusCode);
+    } else {
+      res.statusCode = statusCode;
+    }
+
+    if (typeof res.json === 'function') {
+      res.json(data);
+    } else if (typeof res.send === 'function') {
+      if (typeof res.setHeader === 'function') {
+        res.setHeader('Content-Type', 'application/json');
+      }
+      res.send(JSON.stringify(data));
+    } else if (typeof res.end === 'function') {
+      if (typeof res.setHeader === 'function') {
+        res.setHeader('Content-Type', 'application/json');
+      }
+      res.end(JSON.stringify(data));
+    }
+  } catch (err: any) {
+    console.error('[Mabs Store Response Error]:', err);
+    try {
+      res.statusCode = statusCode;
+      res.end(JSON.stringify(data));
+    } catch {}
+  }
+}
+
+export function handleOptions(req: any, res: any): boolean {
+  if (req.method === 'OPTIONS') {
+    setCorsHeaders(res);
+    if (typeof res.status === 'function') {
+      res.status(200);
+    } else {
+      res.statusCode = 200;
+    }
+    if (typeof res.end === 'function') {
+      res.end();
+    } else if (typeof res.send === 'function') {
+      res.send('');
+    }
+    return true;
+  }
+  return false;
 }
 
 export async function parseRequestBody(req: any): Promise<any> {
@@ -47,27 +112,17 @@ export async function parseRequestBody(req: any): Promise<any> {
   });
 }
 
-export function setCorsHeaders(res: any) {
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
-  res.setHeader(
-    'Access-Control-Allow-Headers',
-    'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, Authorization'
-  );
-}
-
 export function requireAdminAuth(req: any, res: any): boolean {
   const authHeader = (req.headers?.authorization || req.headers?.Authorization) as string | undefined;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    res.status(401).json({ success: false, error: 'Unauthorized: Admin authentication token required.' });
+    sendJsonResponse(res, 401, { success: false, error: 'Unauthorized: Admin authentication token required.' });
     return false;
   }
 
   const token = authHeader.split(' ')[1];
   const isValid = db.verifyToken(token);
   if (!isValid) {
-    res.status(403).json({ success: false, error: 'Forbidden: Invalid or expired admin session. Please log in again.' });
+    sendJsonResponse(res, 403, { success: false, error: 'Forbidden: Invalid or expired admin session. Please log in again.' });
     return false;
   }
 

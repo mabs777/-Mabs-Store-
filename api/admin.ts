@@ -1,13 +1,8 @@
-import { db } from '../server/db.ts';
-import { parseRequestBody, setCorsHeaders, requireAdminAuth, extractSubpath } from './_lib/auth.ts';
+import { db } from './_lib/db.ts';
+import { parseRequestBody, sendJsonResponse, handleOptions, requireAdminAuth, extractSubpath } from './_lib/auth.ts';
 
 export default async function handler(req: any, res: any) {
-  setCorsHeaders(res);
-
-  if (req.method === 'OPTIONS') {
-    res.status(200).end();
-    return;
-  }
+  if (handleOptions(req, res)) return;
 
   // All admin routes require authentication
   if (!requireAdminAuth(req, res)) return;
@@ -19,32 +14,32 @@ export default async function handler(req: any, res: any) {
     // POST /api/admin/change-password
     if (parts[0] === 'change-password') {
       if (req.method !== 'POST') {
-        res.status(405).json({ success: false, error: 'Method Not Allowed' });
+        sendJsonResponse(res, 405, { success: false, error: 'Method Not Allowed' });
         return;
       }
       const body = await parseRequestBody(req);
       const { currentPassword, newPassword } = body || {};
 
       if (!currentPassword || !newPassword) {
-        res.status(400).json({ success: false, error: 'Current password and new password are required.' });
+        sendJsonResponse(res, 400, { success: false, error: 'Current password and new password are required.' });
         return;
       }
       if (newPassword.length < 4) {
-        res.status(400).json({ success: false, error: 'New password must be at least 4 characters.' });
+        sendJsonResponse(res, 400, { success: false, error: 'New password must be at least 4 characters.' });
         return;
       }
 
       const isCurrentValid = await db.verifyAdminPassword(currentPassword);
       if (!isCurrentValid) {
-        res.status(400).json({ success: false, error: 'Current password does not match.' });
+        sendJsonResponse(res, 400, { success: false, error: 'Current password does not match.' });
         return;
       }
 
       const changed = await db.changeAdminPassword(newPassword);
       if (changed) {
-        res.status(200).json({ success: true, message: 'Admin password changed successfully!' });
+        sendJsonResponse(res, 200, { success: true, message: 'Admin password changed successfully!' });
       } else {
-        res.status(500).json({ success: false, error: 'Failed to update password.' });
+        sendJsonResponse(res, 500, { success: false, error: 'Failed to update password.' });
       }
       return;
     }
@@ -52,11 +47,11 @@ export default async function handler(req: any, res: any) {
     // POST /api/admin/reset-data
     if (parts[0] === 'reset-data') {
       if (req.method !== 'POST') {
-        res.status(405).json({ success: false, error: 'Method Not Allowed' });
+        sendJsonResponse(res, 405, { success: false, error: 'Method Not Allowed' });
         return;
       }
       await db.resetToDefaults();
-      res.status(200).json({ success: true, message: 'Store database reset to initial catalogue.' });
+      sendJsonResponse(res, 200, { success: true, message: 'Store database reset to initial catalogue.' });
       return;
     }
 
@@ -68,30 +63,30 @@ export default async function handler(req: any, res: any) {
         const { name, developer, category, apkUrl } = body || {};
 
         if (!name || !name.trim()) {
-          res.status(400).json({ success: false, error: 'App Name is required.' });
+          sendJsonResponse(res, 400, { success: false, error: 'App Name is required.' });
           return;
         }
         if (!developer || !developer.trim()) {
-          res.status(400).json({ success: false, error: 'Developer Name is required.' });
+          sendJsonResponse(res, 400, { success: false, error: 'Developer Name is required.' });
           return;
         }
         if (!category || !category.trim()) {
-          res.status(400).json({ success: false, error: 'Category is required.' });
+          sendJsonResponse(res, 400, { success: false, error: 'Category is required.' });
           return;
         }
         if (!apkUrl || !apkUrl.trim()) {
-          res.status(400).json({ success: false, error: 'APK Download URL is required.' });
+          sendJsonResponse(res, 400, { success: false, error: 'APK Download URL is required.' });
           return;
         }
 
         const created = await db.createApp(body);
-        res.status(201).json({ success: true, data: created, message: 'App successfully published to Mabs Store!' });
+        sendJsonResponse(res, 201, { success: true, data: created, message: 'App successfully published to Mabs Store!' });
         return;
       }
 
       const appId = decodeURIComponent(parts[1] || '');
       if (!appId) {
-        res.status(400).json({ success: false, error: 'App ID is required.' });
+        sendJsonResponse(res, 400, { success: false, error: 'App ID is required.' });
         return;
       }
 
@@ -101,10 +96,10 @@ export default async function handler(req: any, res: any) {
         const { isFeatured } = body || {};
         const updated = await db.toggleFeatured(appId, isFeatured);
         if (!updated) {
-          res.status(404).json({ success: false, error: 'App not found.' });
+          sendJsonResponse(res, 404, { success: false, error: 'App not found.' });
           return;
         }
-        res.status(200).json({
+        sendJsonResponse(res, 200, {
           success: true,
           data: updated,
           message: `App is now ${updated.isFeatured ? 'Featured ⭐' : 'Unfeatured'}`,
@@ -118,24 +113,24 @@ export default async function handler(req: any, res: any) {
         const { name, developer, apkUrl } = body || {};
 
         if (name !== undefined && !name.trim()) {
-          res.status(400).json({ success: false, error: 'App Name cannot be empty.' });
+          sendJsonResponse(res, 400, { success: false, error: 'App Name cannot be empty.' });
           return;
         }
         if (developer !== undefined && !developer.trim()) {
-          res.status(400).json({ success: false, error: 'Developer Name cannot be empty.' });
+          sendJsonResponse(res, 400, { success: false, error: 'Developer Name cannot be empty.' });
           return;
         }
         if (apkUrl !== undefined && !apkUrl.trim()) {
-          res.status(400).json({ success: false, error: 'APK Download URL cannot be empty.' });
+          sendJsonResponse(res, 400, { success: false, error: 'APK Download URL cannot be empty.' });
           return;
         }
 
         const updated = await db.updateApp(appId, body);
         if (!updated) {
-          res.status(404).json({ success: false, error: 'App not found for update.' });
+          sendJsonResponse(res, 404, { success: false, error: 'App not found for update.' });
           return;
         }
-        res.status(200).json({ success: true, data: updated, message: 'App updated successfully!' });
+        sendJsonResponse(res, 200, { success: true, data: updated, message: 'App updated successfully!' });
         return;
       }
 
@@ -143,10 +138,10 @@ export default async function handler(req: any, res: any) {
       if (parts.length === 2 && req.method === 'DELETE') {
         const success = await db.deleteApp(appId);
         if (!success) {
-          res.status(404).json({ success: false, error: 'App not found to delete.' });
+          sendJsonResponse(res, 404, { success: false, error: 'App not found to delete.' });
           return;
         }
-        res.status(200).json({ success: true, message: 'App permanently deleted from store.' });
+        sendJsonResponse(res, 200, { success: true, message: 'App permanently deleted from store.' });
         return;
       }
     }
@@ -158,11 +153,11 @@ export default async function handler(req: any, res: any) {
         const body = await parseRequestBody(req);
         const { name, icon, description } = body || {};
         if (!name || !name.trim()) {
-          res.status(400).json({ success: false, error: 'Category name is required.' });
+          sendJsonResponse(res, 400, { success: false, error: 'Category name is required.' });
           return;
         }
         const category = await db.addCategory(name.trim(), icon, description);
-        res.status(201).json({ success: true, data: category, message: 'Category added successfully.' });
+        sendJsonResponse(res, 201, { success: true, data: category, message: 'Category added successfully.' });
         return;
       }
 
@@ -171,16 +166,17 @@ export default async function handler(req: any, res: any) {
         const catId = decodeURIComponent(parts[1]);
         const deleted = await db.deleteCategory(catId);
         if (!deleted) {
-          res.status(404).json({ success: false, error: 'Category not found.' });
+          sendJsonResponse(res, 404, { success: false, error: 'Category not found.' });
           return;
         }
-        res.status(200).json({ success: true, message: 'Category removed successfully.' });
+        sendJsonResponse(res, 200, { success: true, message: 'Category removed successfully.' });
         return;
       }
     }
 
-    res.status(404).json({ success: false, error: 'Admin API endpoint not found.' });
+    sendJsonResponse(res, 404, { success: false, error: 'Admin API endpoint not found.' });
   } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message || 'Internal server error' });
+    console.error('[API Admin Error]:', err?.stack || err?.message || err);
+    sendJsonResponse(res, 500, { success: false, error: err?.message || 'Internal server error' });
   }
 }

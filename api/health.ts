@@ -1,14 +1,9 @@
-import { setCorsHeaders } from './_lib/auth.ts';
+import { sendJsonResponse, handleOptions } from './_lib/auth.ts';
 
 export default async function handler(req: any, res: any) {
-  setCorsHeaders(res);
+  if (handleOptions(req, res)) return;
 
-  if (req.method === 'OPTIONS') {
-    res.status(200).end();
-    return;
-  }
-
-  res.status(200).json({
+  sendJsonResponse(res, 200, {
     status: 'ok',
     store: '🚀 Mabs Store ⚡',
     environment: process.env.VERCEL ? 'vercel-serverless' : 'node',

@@ -1,20 +1,15 @@
-import { db } from '../server/db.ts';
-import { parseRequestBody, setCorsHeaders, extractSubpath } from './_lib/auth.ts';
+import { db } from './_lib/db.ts';
+import { parseRequestBody, sendJsonResponse, handleOptions, extractSubpath } from './_lib/auth.ts';
 
 export default async function handler(req: any, res: any) {
-  setCorsHeaders(res);
-
-  if (req.method === 'OPTIONS') {
-    res.status(200).end();
-    return;
-  }
+  if (handleOptions(req, res)) return;
 
   const subpath = extractSubpath(req, '/api/auth');
 
   // POST /api/auth/login
   if (subpath === 'login' || (req.method === 'POST' && subpath === '')) {
     if (req.method !== 'POST') {
-      res.status(405).json({ success: false, error: 'Method Not Allowed' });
+      sendJsonResponse(res, 405, { success: false, error: 'Method Not Allowed' });
       return;
     }
 
@@ -23,18 +18,18 @@ export default async function handler(req: any, res: any) {
       const { password, username = 'admin' } = body || {};
 
       if (!password) {
-        res.status(400).json({ success: false, error: 'Admin password is required.' });
+        sendJsonResponse(res, 400, { success: false, error: 'Admin password is required.' });
         return;
       }
 
       const isValid = await db.verifyAdminPassword(password);
       if (!isValid) {
-        res.status(401).json({ success: false, error: 'Invalid admin credentials.' });
+        sendJsonResponse(res, 401, { success: false, error: 'Invalid admin credentials.' });
         return;
       }
 
       const token = db.generateToken(username);
-      res.status(200).json({
+      sendJsonResponse(res, 200, {
         success: true,
         token,
         username,
@@ -42,7 +37,8 @@ export default async function handler(req: any, res: any) {
         message: 'Admin access granted successfully.',
       });
     } catch (err: any) {
-      res.status(500).json({ success: false, error: err.message || 'Internal server error' });
+      console.error('[API Auth Login Error]:', err?.stack || err?.message || err);
+      sendJsonResponse(res, 500, { success: false, error: err?.message || 'Internal server error' });
     }
     return;
   }
@@ -50,29 +46,30 @@ export default async function handler(req: any, res: any) {
   // GET /api/auth/verify
   if (subpath === 'verify' || (req.method === 'GET' && subpath === '')) {
     if (req.method !== 'GET') {
-      res.status(405).json({ success: false, error: 'Method Not Allowed' });
+      sendJsonResponse(res, 405, { success: false, error: 'Method Not Allowed' });
       return;
     }
 
     try {
       const authHeader = (req.headers?.authorization || req.headers?.Authorization) as string | undefined;
       if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        res.status(200).json({ success: false, authenticated: false });
+        sendJsonResponse(res, 200, { success: false, authenticated: false });
         return;
       }
 
       const token = authHeader.split(' ')[1];
       const isValid = db.verifyToken(token);
-      res.status(200).json({
+      sendJsonResponse(res, 200, {
         success: isValid,
         authenticated: isValid,
         role: isValid ? 'admin' : undefined,
       });
     } catch (err: any) {
-      res.status(500).json({ success: false, authenticated: false, error: err.message || 'Internal server error' });
+      console.error('[API Auth Verify Error]:', err?.stack || err?.message || err);
+      sendJsonResponse(res, 500, { success: false, authenticated: false, error: err?.message || 'Internal server error' });
     }
     return;
   }
 
-  res.status(404).json({ success: false, error: 'Auth endpoint not found.' });
+  sendJsonResponse(res, 404, { success: false, error: 'Auth endpoint not found.' });
 }
