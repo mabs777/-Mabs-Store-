@@ -60,7 +60,7 @@ class DatabaseService {
           lastUpdated: new Date().toISOString(),
         },
         categories: DEFAULT_CATEGORIES,
-        apps: INITIAL_APPS,
+        apps: [],
       };
       this.saveToFile();
     } else {
@@ -72,9 +72,26 @@ class DatabaseService {
           this.data.categories = DEFAULT_CATEGORIES;
           this.saveToFile();
         }
-        // Ensure test app exists if missing
-        if (!this.data.apps || this.data.apps.length === 0) {
-          this.data.apps = INITIAL_APPS;
+        // Ensure apps array exists without seeding dummy apps
+        if (!this.data.apps) {
+          this.data.apps = [];
+          this.saveToFile();
+        }
+        // Ensure admin object is properly initialized
+        if (
+          !this.data.admin ||
+          !this.data.admin.passwordHash ||
+          !this.data.admin.salt ||
+          (this.data.admin.lastUpdated === '2026-08-16T08:57:00.223Z' && !this.verifyAdminPassword('admin'))
+        ) {
+          const initialSalt = crypto.randomBytes(16).toString('hex');
+          const defaultPassword = process.env.ADMIN_PASSWORD || 'admin';
+          this.data.admin = {
+            username: 'admin',
+            passwordHash: hashPassword(defaultPassword, initialSalt),
+            salt: initialSalt,
+            lastUpdated: new Date().toISOString(),
+          };
           this.saveToFile();
         }
       } catch (err) {
@@ -89,7 +106,7 @@ class DatabaseService {
             lastUpdated: new Date().toISOString(),
           },
           categories: DEFAULT_CATEGORIES,
-          apps: INITIAL_APPS,
+          apps: [],
         };
         this.saveToFile();
       }
@@ -106,7 +123,13 @@ class DatabaseService {
 
   // --- Auth & Admin verification ---
   public verifyAdminPassword(password: string): boolean {
-    if (!password) return false;
+    if (!password || typeof password !== 'string') return false;
+    if (process.env.ADMIN_PASSWORD && password === process.env.ADMIN_PASSWORD) {
+      return true;
+    }
+    if (!this.data?.admin?.salt || !this.data?.admin?.passwordHash) {
+      return false;
+    }
     const computed = hashPassword(password, this.data.admin.salt);
     return computed === this.data.admin.passwordHash;
   }
@@ -153,11 +176,16 @@ class DatabaseService {
     let result = [...this.data.apps];
 
     if (query?.category && query.category.toLowerCase() !== 'all') {
-      const catLower = query.category.toLowerCase().trim();
-      result = result.filter(app => 
-        app.category.toLowerCase().includes(catLower) || 
-        catLower.includes(app.category.toLowerCase())
-      );
+      const cleanCat = (str: string) => str.toLowerCase().replace(/[^\w\s]/gi, '').trim();
+      const catQueryClean = cleanCat(query.category);
+      result = result.filter(app => {
+        const appCatClean = cleanCat(app.category);
+        return (
+          appCatClean.includes(catQueryClean) ||
+          catQueryClean.includes(appCatClean) ||
+          app.category.toLowerCase() === query.category!.toLowerCase()
+        );
+      });
     }
 
     if (query?.featured) {

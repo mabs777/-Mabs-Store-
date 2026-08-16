@@ -58,6 +58,17 @@ function StoreApp() {
     return localStorage.getItem('mabs_theme') !== 'light';
   });
 
+  // Track admin login/logout transitions to automatically switch views
+  const prevAdminRef = React.useRef(isAdmin);
+  useEffect(() => {
+    if (!prevAdminRef.current && isAdmin) {
+      setCurrentView('admin');
+    } else if (prevAdminRef.current && !isAdmin) {
+      setCurrentView('store');
+    }
+    prevAdminRef.current = isAdmin;
+  }, [isAdmin]);
+
   // Modal states
   const [selectedApp, setSelectedApp] = useState<AppItem | null>(null);
   const [isAppFormOpen, setIsAppFormOpen] = useState(false);
@@ -133,12 +144,16 @@ function StoreApp() {
 
     // Filter by category
     if (activeCategory !== 'all') {
-      const catLower = activeCategory.toLowerCase();
-      result = result.filter(
-        (app) =>
-          app.category.toLowerCase().includes(catLower) ||
-          catLower.includes(app.category.toLowerCase())
-      );
+      const cleanCat = (str: string) => str.toLowerCase().replace(/[^\w\s]/gi, '').trim();
+      const catQueryClean = cleanCat(activeCategory);
+      result = result.filter((app) => {
+        const appCatClean = cleanCat(app.category);
+        return (
+          appCatClean.includes(catQueryClean) ||
+          catQueryClean.includes(appCatClean) ||
+          app.category.toLowerCase() === activeCategory.toLowerCase()
+        );
+      });
     }
 
     // Filter by search query

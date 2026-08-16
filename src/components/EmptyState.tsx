@@ -51,15 +51,15 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
       </div>
 
       <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20 mb-3">
-        <span>🚀 Store Initialized & Ready ⚡</span>
+        <span>🚀 Mabs Store ⚡</span>
       </div>
 
       <h2 className="text-2xl sm:text-3xl font-black text-slate-100 font-['Outfit',sans-serif]">
-        Welcome to Mabs Store
+        No apps available yet.
       </h2>
 
       <p className="text-sm text-slate-300 mt-2 mb-8 leading-relaxed">
-        The store is clean and ready for your APK releases. As the administrator, you can publish unlimited Android APKs with screenshots, changelogs, and direct download links.
+        The application catalog is currently empty. As the administrator, you can publish Android APKs with screenshots, changelogs, and direct download links.
       </p>
 
       <div className="flex flex-col sm:flex-row items-center justify-center gap-3">

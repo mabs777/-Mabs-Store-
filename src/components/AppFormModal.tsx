@@ -85,24 +85,21 @@ export const AppFormModal: React.FC<AppFormModalProps> = ({
       // Reset form
       setName('');
       setDeveloper('');
-      setIconUrl('https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=256&auto=format&fit=crop&q=80');
+      setIconUrl('');
       setShortDescription('');
       setFullDescription('');
       setCategory(categories[0]?.name || 'Utilities');
       setVersion('1.0.0');
-      setAppSize('28.5 MB');
+      setAppSize('');
       setApkUrl('');
-      setScreenshots([
-        'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=800&auto=format&fit=crop&q=80',
-        'https://images.unsplash.com/photo-1620712943543-bcc4688e7485?w=800&auto=format&fit=crop&q=80'
-      ]);
-      setWhatsNew('Initial public release v1.0.0.\n• High-performance native Android experience.\n• Clean responsive design.');
+      setScreenshots(['']);
+      setWhatsNew('');
       setReleaseDate(new Date().toISOString().split('T')[0]);
       setIsFeatured(false);
-      setIsTrending(true);
-      setFeaturedTag("Editor's Pick");
+      setIsTrending(false);
+      setFeaturedTag('');
       setPackageName('');
-      setMinAndroidVersion('Android 8.0 (Oreo) or higher');
+      setMinAndroidVersion('Android 8.0 or higher');
     }
     setErrors({});
   }, [appToEdit, isOpen, categories]);
@@ -125,67 +122,6 @@ export const AppFormModal: React.FC<AppFormModalProps> = ({
     } else {
       setScreenshots(screenshots.filter((_, i) => i !== index));
     }
-  };
-
-  // Helper template filler for rapid testing by the owner
-  const handleLoadSampleData = () => {
-    const samples = [
-      {
-        name: 'OmniVPN — Ultra Fast & Private',
-        developer: '🚀 Mabs Network ⚡',
-        iconUrl: 'https://images.unsplash.com/photo-1544197150-b99a580bb7a8?w=256&auto=format&fit=crop&q=80',
-        shortDescription: 'High-speed encrypted VPN tunnel with 10Gbps servers across 60+ countries and zero activity logs.',
-        fullDescription: 'OmniVPN provides military-grade AES-256 encryption, split-tunneling, built-in ad blocker, and ultra-low latency game accelerators. Protect your digital privacy seamlessly.',
-        category: '🛠️ Utilities',
-        version: '3.2.0',
-        appSize: '22.4 MB',
-        apkUrl: 'https://github.com/mabs-tech/releases/raw/main/omnivpn-v3.2.0.apk',
-        screenshots: [
-          'https://images.unsplash.com/photo-1544197150-b99a580bb7a8?w=800&auto=format&fit=crop&q=80',
-          'https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?w=800&auto=format&fit=crop&q=80'
-        ],
-        whatsNew: '• Added WireGuard v2 protocol.\n• 40% lower ping on gaming servers.\n• New kill-switch auto reconnections.',
-        packageName: 'com.mabs.omnivpn',
-        isFeatured: true,
-      },
-      {
-        name: 'Nexus Pulse — Smart Habit Tracker',
-        developer: 'Pulse Studios',
-        iconUrl: 'https://images.unsplash.com/photo-1484480974693-6ca0a78fb36b?w=256&auto=format&fit=crop&q=80',
-        shortDescription: 'Build enduring daily routines with heatmaps, streak analytics, lock screen widgets, and reminders.',
-        fullDescription: 'Nexus Pulse transforms daily discipline into visual art. Track your water, workouts, reading, and meditation goals with beautiful interactive charts and zero distractions.',
-        category: '💼 Productivity',
-        version: '1.4.2',
-        appSize: '16.8 MB',
-        apkUrl: 'https://github.com/mabs-tech/releases/raw/main/nexus-pulse-v1.4.2.apk',
-        screenshots: [
-          'https://images.unsplash.com/photo-1484480974693-6ca0a78fb36b?w=800&auto=format&fit=crop&q=80'
-        ],
-        whatsNew: '• Added 12 new interactive home screen widgets.\n• Export habit heatmaps to social cards.',
-        packageName: 'com.pulse.nexus',
-        isFeatured: false,
-      }
-    ];
-
-    const pick = samples[Math.floor(Math.random() * samples.length)];
-    setName(pick.name);
-    setDeveloper(pick.developer);
-    setIconUrl(pick.iconUrl);
-    setShortDescription(pick.shortDescription);
-    setFullDescription(pick.fullDescription);
-    setCategory(pick.category);
-    setVersion(pick.version);
-    setAppSize(pick.appSize);
-    setApkUrl(pick.apkUrl);
-    setScreenshots(pick.screenshots);
-    setWhatsNew(pick.whatsNew);
-    setPackageName(pick.packageName);
-    setIsFeatured(pick.isFeatured);
-    showToast({
-      type: 'info',
-      title: 'Template Filled',
-      description: 'Loaded sample APK metadata. You can customize fields before saving.',
-    });
   };
 
   const validate = (): boolean => {
@@ -302,17 +238,6 @@ export const AppFormModal: React.FC<AppFormModalProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
-            {!isEdit && (
-              <button
-                type="button"
-                onClick={handleLoadSampleData}
-                className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-amber-400 text-xs font-semibold border border-amber-500/30 transition-colors"
-                title="Fill form with example data for quick testing"
-              >
-                <span>⚡ Fill Template</span>
-              </button>
-            )}
-
             <button
               id="close-app-form-btn"
               onClick={onClose}

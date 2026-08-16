@@ -1,21 +1,32 @@
 import React, { useState } from 'react';
-import { X, Lock, Shield, Eye, EyeOff, Sparkles, Key } from 'lucide-react';
+import { X, Lock, Shield, Eye, EyeOff, Sparkles, Key, AlertCircle } from 'lucide-react';
 import { useAuth } from '../context/AuthContext.tsx';
 
 export const LoginModal: React.FC = () => {
   const { isLoginModalOpen, closeLoginModal, login, isLoading } = useAuth();
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   if (!isLoginModalOpen) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!password.trim()) return;
+    setError(null);
     const success = await login(password.trim());
     if (success) {
       setPassword('');
+      setError(null);
+    } else {
+      setError('Invalid admin credentials. Please enter the correct password.');
     }
+  };
+
+  const handleClose = () => {
+    setError(null);
+    setPassword('');
+    closeLoginModal();
   };
 
   return (
@@ -26,7 +37,7 @@ export const LoginModal: React.FC = () => {
       >
         <button
           id="close-login-modal-btn"
-          onClick={closeLoginModal}
+          onClick={handleClose}
           className="absolute top-4 right-4 p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-100 transition-colors"
         >
           <X className="w-4 h-4" />
@@ -47,6 +58,13 @@ export const LoginModal: React.FC = () => {
           </p>
         </div>
 
+        {error && (
+          <div className="mb-4 p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-xs text-rose-300 flex items-center gap-2 animate-in fade-in duration-150">
+            <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+            <span>{error}</span>
+          </div>
+        )}
+
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-xs font-semibold text-slate-300 mb-1.5 flex items-center justify-between">
@@ -57,7 +75,10 @@ export const LoginModal: React.FC = () => {
                 id="admin-password-input"
                 type={showPassword ? 'text' : 'password'}
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={(e) => {
+                  setPassword(e.target.value);
+                  if (error) setError(null);
+                }}
                 placeholder="Enter admin password..."
                 className="w-full pl-3.5 pr-10 py-3 rounded-xl text-sm bg-slate-950/80 border border-slate-700 focus:outline-none focus:ring-2 focus:ring-amber-500/50 text-slate-100 placeholder-slate-500 font-mono"
                 required
