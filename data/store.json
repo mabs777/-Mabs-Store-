@@ -1,0 +1,59 @@
+{
+  "admin": {
+    "username": "admin",
+    "passwordHash": "763a723616f61cfeb7aed7939b99ca4ecc82915a9564baa4d7322337a845d6b77053820e93e99e9e6a828a030c6ac10f2ccd8235d0da4a96e591d84f55bc8083",
+    "salt": "9032c5244dc1c9766edfca98d3f69b26",
+    "lastUpdated": "2026-08-16T08:57:00.223Z"
+  },
+  "categories": [
+    {
+      "id": "ai",
+      "name": "🤖 AI",
+      "icon": "Bot",
+      "description": "Artificial intelligence assistants and smart utilities"
+    },
+    {
+      "id": "games",
+      "name": "🎮 Games",
+      "icon": "Gamepad2",
+      "description": "Action, strategy, casual and arcade games"
+    },
+    {
+      "id": "education",
+      "name": "📚 Education",
+      "icon": "GraduationCap",
+      "description": "Learning platforms, reference guides and courses"
+    },
+    {
+      "id": "utilities",
+      "name": "🛠️ Utilities",
+      "icon": "Wrench",
+      "description": "System tools, file managers, diagnostic and performance apps"
+    },
+    {
+      "id": "entertainment",
+      "name": "🎬 Entertainment",
+      "icon": "Film",
+      "description": "Media players, streaming, podcasts and creative audio"
+    },
+    {
+      "id": "social",
+      "name": "📱 Social",
+      "icon": "MessageSquare",
+      "description": "Communication, messaging and social platforms"
+    },
+    {
+      "id": "productivity",
+      "name": "💼 Productivity",
+      "icon": "Briefcase",
+      "description": "Task managers, notes, office suites and scanners"
+    },
+    {
+      "id": "other",
+      "name": "🌐 Other",
+      "icon": "Globe",
+      "description": "Specialty tools, lifestyle and experimental applications"
+    }
+  ],
+  "apps": []
+}
