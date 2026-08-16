@@ -3,8 +3,9 @@ import path from 'path';
 import crypto from 'crypto';
 import type { AppItem, CategoryItem, StoreStats } from '../src/types.ts';
 
-const DATA_DIR = path.join(process.cwd(), 'data');
-const DATA_FILE = path.join(DATA_DIR, 'store.json');
+const ROOT_DATA_DIR = path.join(process.cwd(), 'data');
+const ROOT_DATA_FILE = path.join(ROOT_DATA_DIR, 'store.json');
+const TMP_DATA_FILE = path.join('/tmp', 'store.json');
 const AUTH_SECRET = process.env.ADMIN_SECRET_KEY || 'mabs-store-super-secret-key-2026-xyz';
 
 interface StoreData {
@@ -37,17 +38,60 @@ const INITIAL_APPS: AppItem[] = [];
 
 class DatabaseService {
   private data: StoreData;
+  private activeFilePath: string = ROOT_DATA_FILE;
 
   constructor() {
     this.init();
   }
 
+  private resolveStoreFilePath(): string {
+    // If running in Vercel or AWS Lambda serverless environment, use /tmp
+    if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
+      return TMP_DATA_FILE;
+    }
+    return ROOT_DATA_FILE;
+  }
+
   private init() {
-    if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
+    this.activeFilePath = this.resolveStoreFilePath();
+
+    // In serverless, if /tmp/store.json does not exist yet, see if root data/store.json exists to copy from
+    if (this.activeFilePath === TMP_DATA_FILE && !fs.existsSync(TMP_DATA_FILE)) {
+      if (fs.existsSync(ROOT_DATA_FILE)) {
+        try {
+          const rootData = fs.readFileSync(ROOT_DATA_FILE, 'utf-8');
+          fs.writeFileSync(TMP_DATA_FILE, rootData, 'utf-8');
+        } catch (e) {
+          // ignore if cannot copy
+        }
+      }
     }
 
-    if (!fs.existsSync(DATA_FILE)) {
+    if (!fs.existsSync(path.dirname(this.activeFilePath))) {
+      try {
+        fs.mkdirSync(path.dirname(this.activeFilePath), { recursive: true });
+      } catch (err) {
+        // Fallback to /tmp if primary directory cannot be created (e.g. read-only fs)
+        this.activeFilePath = TMP_DATA_FILE;
+      }
+    }
+
+    let loaded = false;
+    // Try to load from active file or fallback to root data file
+    for (const filePath of [this.activeFilePath, ROOT_DATA_FILE]) {
+      if (fs.existsSync(filePath)) {
+        try {
+          const raw = fs.readFileSync(filePath, 'utf-8');
+          this.data = JSON.parse(raw);
+          loaded = true;
+          break;
+        } catch (err) {
+          console.error(`Error parsing ${filePath}:`, err);
+        }
+      }
+    }
+
+    if (!loaded || !this.data) {
       const initialSalt = crypto.randomBytes(16).toString('hex');
       const defaultPassword = process.env.ADMIN_PASSWORD || 'admin';
       const initialPasswordHash = hashPassword(defaultPassword, initialSalt);
@@ -64,49 +108,30 @@ class DatabaseService {
       };
       this.saveToFile();
     } else {
-      try {
-        const raw = fs.readFileSync(DATA_FILE, 'utf-8');
-        this.data = JSON.parse(raw);
-        // Guarantee categories exist
-        if (!this.data.categories || this.data.categories.length === 0) {
-          this.data.categories = DEFAULT_CATEGORIES;
-          this.saveToFile();
-        }
-        // Ensure apps array exists without seeding dummy apps
-        if (!this.data.apps) {
-          this.data.apps = [];
-          this.saveToFile();
-        }
-        // Ensure admin object is properly initialized
-        if (
-          !this.data.admin ||
-          !this.data.admin.passwordHash ||
-          !this.data.admin.salt ||
-          (this.data.admin.lastUpdated === '2026-08-16T08:57:00.223Z' && !this.verifyAdminPassword('admin'))
-        ) {
-          const initialSalt = crypto.randomBytes(16).toString('hex');
-          const defaultPassword = process.env.ADMIN_PASSWORD || 'admin';
-          this.data.admin = {
-            username: 'admin',
-            passwordHash: hashPassword(defaultPassword, initialSalt),
-            salt: initialSalt,
-            lastUpdated: new Date().toISOString(),
-          };
-          this.saveToFile();
-        }
-      } catch (err) {
-        console.error('Error loading store.json, re-initializing default data', err);
+      // Guarantee categories exist
+      if (!this.data.categories || this.data.categories.length === 0) {
+        this.data.categories = DEFAULT_CATEGORIES;
+        this.saveToFile();
+      }
+      // Ensure apps array exists without seeding dummy apps
+      if (!this.data.apps) {
+        this.data.apps = [];
+        this.saveToFile();
+      }
+      // Ensure admin object is properly initialized
+      if (
+        !this.data.admin ||
+        !this.data.admin.passwordHash ||
+        !this.data.admin.salt ||
+        (this.data.admin.lastUpdated === '2026-08-16T08:57:00.223Z' && !this.verifyAdminPassword('admin'))
+      ) {
         const initialSalt = crypto.randomBytes(16).toString('hex');
         const defaultPassword = process.env.ADMIN_PASSWORD || 'admin';
-        this.data = {
-          admin: {
-            username: 'admin',
-            passwordHash: hashPassword(defaultPassword, initialSalt),
-            salt: initialSalt,
-            lastUpdated: new Date().toISOString(),
-          },
-          categories: DEFAULT_CATEGORIES,
-          apps: [],
+        this.data.admin = {
+          username: 'admin',
+          passwordHash: hashPassword(defaultPassword, initialSalt),
+          salt: initialSalt,
+          lastUpdated: new Date().toISOString(),
         };
         this.saveToFile();
       }
@@ -115,9 +140,19 @@ class DatabaseService {
 
   private saveToFile() {
     try {
-      fs.writeFileSync(DATA_FILE, JSON.stringify(this.data, null, 2), 'utf-8');
+      fs.writeFileSync(this.activeFilePath, JSON.stringify(this.data, null, 2), 'utf-8');
     } catch (err) {
-      console.error('Failed to save store database to disk:', err);
+      // If saving to active path failed (e.g. read-only filesystem), fallback to /tmp
+      if (this.activeFilePath !== TMP_DATA_FILE) {
+        try {
+          this.activeFilePath = TMP_DATA_FILE;
+          fs.writeFileSync(this.activeFilePath, JSON.stringify(this.data, null, 2), 'utf-8');
+        } catch (tmpErr) {
+          console.error('Failed to save store database to /tmp:', tmpErr);
+        }
+      } else {
+        console.error('Failed to save store database to disk:', err);
+      }
     }
   }
 
