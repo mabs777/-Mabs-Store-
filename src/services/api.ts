@@ -1,8 +1,32 @@
+import { upload } from '@vercel/blob/client';
 import type { AppItem, CategoryItem, StoreStats, AdminAuthResponse } from '../types.ts';
 
 const API_BASE = '/api';
 
 export const api = {
+  // Direct Client-to-Vercel Blob Upload
+  async uploadFile(file: File, token: string, onProgress?: (percent: number) => void): Promise<{ url: string; pathname: string; contentType: string }> {
+    const blob = await upload(file.name, file, {
+      access: 'public',
+      handleUploadUrl: `${API_BASE}/upload`,
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      onUploadProgress: (progress) => {
+        if (onProgress && progress.total > 0) {
+          const percent = Math.round((progress.loaded / progress.total) * 100);
+          onProgress(percent);
+        }
+      },
+    });
+
+    return {
+      url: blob.url,
+      pathname: blob.pathname,
+      contentType: blob.contentType,
+    };
+  },
+
   // Visitor Public Endpoints
   async getApps(params?: { q?: string; category?: string; sort?: string; featured?: boolean }): Promise<AppItem[]> {
     const query = new URLSearchParams();

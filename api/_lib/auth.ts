@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'http';
-import { db } from './db.js';
+import { db } from './db.ts';
 
 export interface VercelReq extends IncomingMessage {
   query?: Record<string, string | string[]>;

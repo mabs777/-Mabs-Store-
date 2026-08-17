@@ -1,4 +1,4 @@
-import { sendJsonResponse, handleOptions } from './_lib/auth.js';
+import { sendJsonResponse, handleOptions } from './_lib/auth.ts';
 
 export default async function handler(req: any, res: any) {
   if (handleOptions(req, res)) return;

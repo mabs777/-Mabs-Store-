@@ -1,6 +1,7 @@
 import express from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
+import { handleUpload, type HandleUploadBody } from '@vercel/blob/client';
 import { db } from './server/db.ts';
 
 async function startServer() {
@@ -167,6 +168,60 @@ async function startServer() {
   // ==========================================
   // PROTECTED ADMIN ROUTES (CRUD & Store Controls)
   // ==========================================
+
+  // Vercel Blob Client Upload Token Handler
+  app.post('/api/upload', requireAdmin, async (req, res) => {
+    const blobToken = process.env.BLOB_READ_WRITE_TOKEN;
+    if (!blobToken) {
+      res.status(500).json({
+        success: false,
+        error: 'Vercel Blob storage is not configured. Please set the BLOB_READ_WRITE_TOKEN environment variable in Vercel.',
+      });
+      return;
+    }
+
+    try {
+      const body = req.body as HandleUploadBody;
+      const jsonResponse = await handleUpload({
+        body,
+        request: req as any,
+        token: blobToken,
+        onBeforeGenerateToken: async (pathname) => {
+          const lower = pathname.toLowerCase();
+          const isApk = lower.endsWith('.apk');
+          const isImage = lower.endsWith('.png') || lower.endsWith('.jpg') || lower.endsWith('.jpeg') || lower.endsWith('.webp') || lower.endsWith('.svg') || lower.endsWith('.gif');
+
+          if (!isApk && !isImage) {
+            throw new Error('Only APK files and image files (PNG, JPG, WEBP, SVG, GIF) are allowed.');
+          }
+
+          return {
+            allowedContentTypes: [
+              'application/vnd.android.package-archive',
+              'application/octet-stream',
+              'application/x-zip-compressed',
+              'application/zip',
+              'image/png',
+              'image/jpeg',
+              'image/webp',
+              'image/svg+xml',
+              'image/gif',
+            ],
+            maximumSizeInBytes: isApk ? 500 * 1024 * 1024 : 10 * 1024 * 1024,
+            addRandomSuffix: true,
+          };
+        },
+        onUploadCompleted: async ({ blob }) => {
+          console.log(`[Blob Upload Complete]: ${blob.pathname} -> ${blob.url}`);
+        },
+      });
+
+      res.json(jsonResponse);
+    } catch (err: any) {
+      console.error('[Blob Upload Error]:', err);
+      res.status(400).json({ success: false, error: err.message });
+    }
+  });
 
   // Create App
   app.post('/api/admin/apps', requireAdmin, async (req, res) => {
