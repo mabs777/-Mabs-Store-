@@ -8,13 +8,11 @@ import {
   Edit3, 
   Trash2, 
   ShieldCheck, 
-  ExternalLink,
   Flame,
   CheckCircle2
 } from 'lucide-react';
 import type { AppItem } from '../types.ts';
 import { useAuth } from '../context/AuthContext.tsx';
-import { api } from '../services/api.ts';
 import { useToast } from './Toast.tsx';
 
 interface AppCardProps {
@@ -34,54 +32,43 @@ export const AppCard: React.FC<AppCardProps> = ({
   onToggleFeatured,
   onDownloadCompleted,
 }) => {
-  const { isAdmin, token } = useAuth();
+  const { isAdmin } = useAuth();
   const { showToast } = useToast();
-  const [isDownloading, setIsDownloading] = useState(false);
   const [downloadSuccess, setDownloadSuccess] = useState(false);
   const [imageLoaded, setImageLoaded] = useState(false);
   const [imageError, setImageError] = useState(false);
 
-  const handleDownload = async (e: React.MouseEvent) => {
+  const handleDownload = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (isDownloading) return;
 
-    try {
-      setIsDownloading(true);
-      const res = await api.recordDownload(app.id);
-      
-      if (onDownloadCompleted && res.downloadsCount) {
-        onDownloadCompleted(app.id, res.downloadsCount);
-      }
+    const targetUrl = app.apkUrl;
 
-      setDownloadSuccess(true);
-      showToast({
-        type: 'success',
-        title: `Starting Download: ${app.name}`,
-        description: `Version ${app.version} (${app.appSize}) — APK is downloading directly.`,
-      });
-
-      // Direct APK download triggering using the stored APK URL
-      const link = document.createElement('a');
-      link.href = res.apkUrl || app.apkUrl;
-      link.download = `${app.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-v${app.version}.apk`;
-      link.target = '_blank';
-      link.rel = 'noopener noreferrer';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-
-      setTimeout(() => {
-        setDownloadSuccess(false);
-      }, 3000);
-    } catch (err: any) {
+    if (!targetUrl) {
       showToast({
         type: 'error',
         title: 'Download Failed',
-        description: err.message || 'Could not initiate APK download.',
+        description: 'APK Download URL is missing.',
       });
-    } finally {
-      setIsDownloading(false);
+      return;
     }
+
+    setDownloadSuccess(true);
+    showToast({
+      type: 'success',
+      title: `Starting Download: ${app.name}`,
+      description: `Redirecting to download link...`,
+    });
+
+    // Direct redirection to GitHub Raw Link / CPAgrip Link
+    window.open(targetUrl, '_blank', 'noopener,noreferrer');
+
+    if (onDownloadCompleted) {
+      onDownloadCompleted(app.id, (app.downloadsCount || 0) + 1);
+    }
+
+    setTimeout(() => {
+      setDownloadSuccess(false);
+    }, 3000);
   };
 
   const defaultIcon = 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=256&auto=format&fit=crop&q=80';
@@ -206,7 +193,6 @@ export const AppCard: React.FC<AppCardProps> = ({
           <button
             id={`download-apk-${app.id}`}
             onClick={handleDownload}
-            disabled={isDownloading}
             className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm active:scale-95 cursor-pointer ${
               downloadSuccess
                 ? 'bg-emerald-600 text-white'
@@ -217,11 +203,6 @@ export const AppCard: React.FC<AppCardProps> = ({
               <>
                 <CheckCircle2 className="w-3.5 h-3.5" />
                 <span>Downloaded</span>
-              </>
-            ) : isDownloading ? (
-              <>
-                <div className="w-3.5 h-3.5 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />
-                <span>Fetching...</span>
               </>
             ) : (
               <>
