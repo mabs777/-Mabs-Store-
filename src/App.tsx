@@ -37,7 +37,7 @@ import { api } from './services/api.ts';
 import type { AppItem, CategoryItem, StoreStats, SortOption } from './types.ts';
 
 function StoreApp() {
-  const { isAdmin, token, openLoginModal } = useAuth();
+  const { isAdmin, token } = useAuth();
   const { showToast } = useToast();
 
   // App data state
@@ -58,7 +58,7 @@ function StoreApp() {
     return localStorage.getItem('mabs_theme') !== 'light';
   });
 
-  // Track admin login/logout transitions to automatically switch views
+  // Track admin login/logout transitions
   const prevAdminRef = React.useRef(isAdmin);
   useEffect(() => {
     if (!prevAdminRef.current && isAdmin) {
@@ -89,26 +89,26 @@ function StoreApp() {
     }
   }, [darkMode]);
 
-  // Load initial data
+  // Load initial data safely
   const loadData = useCallback(async () => {
     try {
       setIsLoading(true);
       setError(null);
 
       const [appsData, catsData, statsData] = await Promise.all([
-        api.getApps(),
-        api.getCategories(),
+        api.getApps().catch(() => []),
+        api.getCategories().catch(() => []),
         api.getStats().catch(() => null),
       ]);
 
-      setApps(appsData);
-      setCategories(catsData);
+      setApps(Array.isArray(appsData) ? appsData : []);
+      setCategories(Array.isArray(catsData) ? catsData : []);
       if (statsData) setStats(statsData);
 
-      // Check URL query param for deep linked app (e.g. ?app=some-id)
+      // Deep link URL check (?app=id)
       const urlParams = new URLSearchParams(window.location.search);
       const deepAppId = urlParams.get('app');
-      if (deepAppId && appsData.length > 0) {
+      if (deepAppId && Array.isArray(appsData)) {
         const found = appsData.find((a) => a.id === deepAppId);
         if (found) setSelectedApp(found);
       }
@@ -123,7 +123,7 @@ function StoreApp() {
     loadData();
   }, [loadData]);
 
-  // Handle URL deep link state update
+  // Update URL on app selection
   useEffect(() => {
     if (selectedApp) {
       const url = new URL(window.location.href);
@@ -138,80 +138,74 @@ function StoreApp() {
     }
   }, [selectedApp]);
 
-  // Filtered & Sorted Apps calculation
+  // Robust Category & Search Filter Logic
   const filteredApps = useMemo(() => {
     let result = [...apps];
 
-    // Filter by category
-    if (activeCategory !== 'all') {
-      const cleanCat = (str: string) => str.toLowerCase().replace(/[^\w\s]/gi, '').trim();
-      const catQueryClean = cleanCat(activeCategory);
+    // 1. Filter by category
+    if (activeCategory && activeCategory !== 'all') {
+      const clean = (str: string) =>
+        (str || '').toLowerCase().replace(/[^a-z0-9]/g, '').trim();
+
+      const targetCat = clean(activeCategory);
+
+      // Find matching category object if activeCategory is ID or Name
+      const matchedCatObj = categories.find(
+        (c) => clean(c.id) === targetCat || clean(c.name) === targetCat
+      );
+
+      const validTargetNames = [
+        targetCat,
+        matchedCatObj ? clean(matchedCatObj.name) : '',
+        matchedCatObj ? clean(matchedCatObj.id) : '',
+      ].filter(Boolean);
+
       result = result.filter((app) => {
-        const appCatClean = cleanCat(app.category);
-        return (
-          appCatClean.includes(catQueryClean) ||
-          catQueryClean.includes(appCatClean) ||
-          app.category.toLowerCase() === activeCategory.toLowerCase()
+        const appCatClean = clean(app.category);
+        return validTargetNames.some(
+          (t) => appCatClean === t || appCatClean.includes(t) || t.includes(appCatClean)
         );
       });
     }
 
-    // Filter by search query
+    // 2. Filter by search query
     if (searchQuery.trim() !== '') {
       const q = searchQuery.toLowerCase().trim();
       const terms = q.split(/\s+/);
       result = result.filter((app) => {
-        const fullText = `${app.name} ${app.developer} ${app.category} ${app.shortDescription} ${app.fullDescription} ${app.packageName || ''}`.toLowerCase();
+        const fullText = `${app.name || ''} ${app.developer || ''} ${app.category || ''} ${app.shortDescription || ''} ${app.fullDescription || ''} ${app.packageName || ''}`.toLowerCase();
         return terms.every((t) => fullText.includes(t));
       });
     }
 
-    // Sort
+    // 3. Sorting
     if (activeSort === 'trending') {
       result.sort(
         (a, b) =>
           (b.isTrending ? 1 : 0) - (a.isTrending ? 1 : 0) ||
-          b.downloadsCount - a.downloadsCount
+          (b.downloadsCount || 0) - (a.downloadsCount || 0)
       );
     } else if (activeSort === 'latest') {
       result.sort(
         (a, b) =>
-          new Date(b.releaseDate || b.updatedAt).getTime() -
-          new Date(a.releaseDate || a.updatedAt).getTime()
+          new Date(b.releaseDate || b.updatedAt || 0).getTime() -
+          new Date(a.releaseDate || a.updatedAt || 0).getTime()
       );
     } else if (activeSort === 'popular') {
-      result.sort((a, b) => b.downloadsCount - a.downloadsCount);
+      result.sort((a, b) => (b.downloadsCount || 0) - (a.downloadsCount || 0));
     } else if (activeSort === 'rating') {
-      result.sort((a, b) => b.rating - a.rating || b.ratingCount - a.ratingCount);
+      result.sort((a, b) => (b.rating || 0) - (a.rating || 0));
     } else if (activeSort === 'name') {
-      result.sort((a, b) => a.name.localeCompare(b.name));
+      result.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
     }
 
     return result;
-  }, [apps, activeCategory, searchQuery, activeSort]);
+  }, [apps, categories, activeCategory, searchQuery, activeSort]);
 
-  // Featured apps for hero banner
-  const featuredApps = useMemo(() => {
-    return apps.filter((a) => a.isFeatured);
-  }, [apps]);
+  // Featured apps
+  const featuredApps = useMemo(() => apps.filter((a) => a.isFeatured), [apps]);
 
-  // Trending apps
-  const trendingApps = useMemo(() => {
-    return apps.filter((a) => a.isTrending || a.downloadsCount > 1000).slice(0, 6);
-  }, [apps]);
-
-  // Latest releases
-  const latestApps = useMemo(() => {
-    return [...apps]
-      .sort(
-        (a, b) =>
-          new Date(b.releaseDate || b.updatedAt).getTime() -
-          new Date(a.releaseDate || a.updatedAt).getTime()
-      )
-      .slice(0, 6);
-  }, [apps]);
-
-  // App mutation handlers
+  // App handlers
   const handleOpenAddApp = () => {
     setAppToEdit(null);
     setIsAppFormOpen(true);
@@ -235,13 +229,13 @@ function StoreApp() {
       showToast({
         type: 'success',
         title: updated.isFeatured ? 'App Featured' : 'App Unfeatured',
-        description: `"${updated.name}" featured status updated.`,
+        description: `"${updated.name}" status updated.`,
       });
     } catch (err: any) {
       showToast({
         type: 'error',
         title: 'Action Failed',
-        description: err.message || 'Could not toggle featured status.',
+        description: err.message || 'Could not toggle status.',
       });
     }
   };
@@ -249,9 +243,7 @@ function StoreApp() {
   const handleAppSaved = (savedApp: AppItem, isEdit: boolean) => {
     if (isEdit) {
       setApps((prev) => prev.map((a) => (a.id === savedApp.id ? savedApp : a)));
-      if (selectedApp?.id === savedApp.id) {
-        setSelectedApp(savedApp);
-      }
+      if (selectedApp?.id === savedApp.id) setSelectedApp(savedApp);
     } else {
       setApps((prev) => [savedApp, ...prev]);
     }
@@ -259,9 +251,7 @@ function StoreApp() {
 
   const handleAppDeleted = (appId: string) => {
     setApps((prev) => prev.filter((a) => a.id !== appId));
-    if (selectedApp?.id === appId) {
-      setSelectedApp(null);
-    }
+    if (selectedApp?.id === appId) setSelectedApp(null);
   };
 
   const handleDownloadCompleted = (appId: string, newDownloadsCount: number) => {
@@ -271,14 +261,6 @@ function StoreApp() {
     if (selectedApp?.id === appId) {
       setSelectedApp((prev) => (prev ? { ...prev, downloadsCount: newDownloadsCount } : null));
     }
-  };
-
-  const handleCategoryAdded = (newCat: CategoryItem) => {
-    setCategories((prev) => [...prev, newCat]);
-  };
-
-  const handleCategoryDeleted = (catId: string) => {
-    setCategories((prev) => prev.filter((c) => c.id !== catId));
   };
 
   const isFiltering = activeCategory !== 'all' || searchQuery.trim() !== '';
@@ -300,12 +282,8 @@ function StoreApp() {
         stats={stats}
       />
 
-      {/* Main Content View Container */}
       <main className="flex-1">
         {currentView === 'admin' && isAdmin ? (
-          /* =================================================== */
-          /* ADMIN DASHBOARD VIEW                                */
-          /* =================================================== */
           <AdminDashboard
             apps={apps}
             categories={categories}
@@ -320,19 +298,14 @@ function StoreApp() {
             onToggleFeatured={handleToggleFeatured}
           />
         ) : (
-          /* =================================================== */
-          /* PUBLIC STOREFRONT VIEW                              */
-          /* =================================================== */
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 space-y-8">
-            {/* Loading Skeleton */}
             {isLoading && (
               <div className="py-20 text-center">
                 <div className="w-12 h-12 border-4 border-amber-500 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-                <p className="text-sm font-semibold text-slate-300">Loading 🚀 Mabs Store ⚡ APKs...</p>
+                <p className="text-sm font-semibold text-slate-300">Loading Mabs Store APKs...</p>
               </div>
             )}
 
-            {/* Error Message with retry */}
             {error && (
               <div className="p-4 rounded-2xl bg-rose-950/60 border border-rose-500/30 text-rose-200 text-center max-w-lg mx-auto">
                 <p className="text-sm font-semibold">{error}</p>
@@ -348,7 +321,6 @@ function StoreApp() {
 
             {!isLoading && !error && (
               <>
-                {/* 1. Featured Hero Carousel (Only shown when not actively filtering by category/search and featured apps exist) */}
                 {!isFiltering && featuredApps.length > 0 && (
                   <FeaturedCarousel
                     apps={featuredApps}
@@ -357,7 +329,7 @@ function StoreApp() {
                   />
                 )}
 
-                {/* 2. Category Navigation Bar (Pills) */}
+                {/* Category Pills */}
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
                     <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
@@ -376,30 +348,29 @@ function StoreApp() {
 
                   <div className="flex items-center gap-2 overflow-x-auto pb-2 no-scrollbar">
                     <button
-                      id="cat-pill-all"
                       onClick={() => setActiveCategory('all')}
                       className={`px-4 py-2 rounded-xl text-xs font-bold shrink-0 transition-all cursor-pointer ${
                         activeCategory === 'all'
                           ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
-                          : 'bg-slate-900 text-slate-300 hover:bg-slate-800 hover:text-slate-100 border border-slate-800'
+                          : 'bg-slate-900 text-slate-300 hover:bg-slate-800 border border-slate-800'
                       }`}
                     >
                       <span>⚡ All Applications</span>
                     </button>
 
                     {categories.map((cat) => {
+                      const clean = (s: string) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
                       const isSelected =
-                        activeCategory.toLowerCase() === cat.name.toLowerCase() ||
-                        activeCategory.toLowerCase() === cat.id.toLowerCase();
+                        clean(activeCategory) === clean(cat.name) ||
+                        clean(activeCategory) === clean(cat.id);
                       return (
                         <button
                           key={cat.id}
-                          id={`cat-pill-${cat.id}`}
                           onClick={() => setActiveCategory(cat.name)}
                           className={`px-4 py-2 rounded-xl text-xs font-bold shrink-0 transition-all cursor-pointer flex items-center gap-1.5 ${
                             isSelected
                               ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
-                              : 'bg-slate-900 text-slate-300 hover:bg-slate-800 hover:text-slate-100 border border-slate-800'
+                              : 'bg-slate-900 text-slate-300 hover:bg-slate-800 border border-slate-800'
                           }`}
                         >
                           <span>{cat.name}</span>
@@ -409,11 +380,11 @@ function StoreApp() {
                   </div>
                 </div>
 
-                {/* 3. Filter / Search Status & Sorting Bar */}
+                {/* Filter / Sort Bar */}
                 <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pt-2 pb-1 border-b border-slate-800">
                   <div className="flex items-center gap-2 text-xs text-slate-300">
                     <span className="font-bold text-slate-100 text-sm">
-                      {isFiltering ? 'Search & Filter Results' : 'All Android APKs'}
+                      {isFiltering ? 'Filter Results' : 'All Android APKs'}
                     </span>
                     <span className="bg-slate-800 text-slate-300 px-2 py-0.5 rounded-full text-[11px] font-semibold border border-slate-700">
                       {filteredApps.length} {filteredApps.length === 1 ? 'App' : 'Apps'}
@@ -425,15 +396,12 @@ function StoreApp() {
                     )}
                   </div>
 
-                  {/* Sort selector */}
-                  <div className="flex items-center gap-2 self-end sm:self-auto">
+                  <div className="flex items-center gap-2">
                     <ArrowUpDown className="w-3.5 h-3.5 text-slate-400" />
-                    <span className="text-xs text-slate-400 hidden sm:inline">Sort:</span>
                     <select
-                      id="sort-select"
                       value={activeSort}
                       onChange={(e) => setActiveSort(e.target.value as SortOption)}
-                      className="bg-slate-900 text-slate-200 text-xs px-3 py-1.5 rounded-xl border border-slate-700 focus:outline-none focus:ring-2 focus:ring-amber-500/50"
+                      className="bg-slate-900 text-slate-200 text-xs px-3 py-1.5 rounded-xl border border-slate-700 focus:outline-none"
                     >
                       <option value="trending">🔥 Trending First</option>
                       <option value="latest">🆕 Latest Releases</option>
@@ -444,15 +412,10 @@ function StoreApp() {
                   </div>
                 </div>
 
-                {/* 4. App Cards Grid / Empty States */}
+                {/* Grid */}
                 {apps.length === 0 ? (
-                  /* Store is completely clean & empty */
-                  <EmptyState
-                    type="catalog-empty"
-                    onOpenAddApp={handleOpenAddApp}
-                  />
+                  <EmptyState type="catalog-empty" onOpenAddApp={handleOpenAddApp} />
                 ) : filteredApps.length === 0 ? (
-                  /* Search / Filter returned no apps */
                   <EmptyState
                     type="search-empty"
                     searchQuery={searchQuery || activeCategory}
@@ -462,7 +425,6 @@ function StoreApp() {
                     }}
                   />
                 ) : (
-                  /* Render App Cards Grid */
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 sm:gap-6">
                     {filteredApps.map((app) => (
                       <AppCard
@@ -487,44 +449,16 @@ function StoreApp() {
       <footer className="mt-16 border-t border-slate-800/80 bg-slate-950/90 py-10 text-slate-400 text-xs">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-amber-500 to-orange-500 p-0.5">
-              <div className="w-full h-full bg-slate-950 rounded-[6px] flex items-center justify-center">
-                <Rocket className="w-4 h-4 text-amber-400" />
-              </div>
-            </div>
-            <div>
-              <span className="font-extrabold text-slate-200 text-sm font-['Outfit',sans-serif]">
-                🚀 Mabs Store ⚡
-              </span>
-              <span className="block text-[11px] text-slate-500">
-                Independent Android APK Marketplace
-              </span>
-            </div>
+            <Rocket className="w-5 h-5 text-amber-400" />
+            <span className="font-extrabold text-slate-200 text-sm">🚀 Mabs Store ⚡</span>
           </div>
-
-          <div className="flex items-center gap-4 text-slate-400">
-            <span className="flex items-center gap-1">
-              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-              Direct & Verified APKs
-            </span>
-            <span>•</span>
-            <span className="flex items-center gap-1">
-              <Zap className="w-3.5 h-3.5 text-amber-400" />
-              High Speed CDN
-            </span>
-          </div>
-
           <div className="text-slate-500 text-[11px]">
             © {new Date().getFullYear()} Mabs Store. All rights reserved.
           </div>
         </div>
       </footer>
 
-      {/* =================================================== */}
-      {/* MODALS & OVERLAYS                                   */}
-      {/* =================================================== */}
-
-      {/* App Details Modal */}
+      {/* Modals */}
       <AppDetailsModal
         app={selectedApp}
         isOpen={!!selectedApp}
@@ -538,7 +472,6 @@ function StoreApp() {
         }}
       />
 
-      {/* Add / Edit App Modal */}
       <AppFormModal
         isOpen={isAppFormOpen}
         onClose={() => setIsAppFormOpen(false)}
@@ -547,7 +480,6 @@ function StoreApp() {
         onSuccess={handleAppSaved}
       />
 
-      {/* Delete Confirmation Modal */}
       <DeleteConfirmModal
         app={appToDelete}
         isOpen={isDeleteModalOpen}
@@ -555,22 +487,19 @@ function StoreApp() {
         onDeleted={handleAppDeleted}
       />
 
-      {/* Category Manager Modal */}
       <CategoryManagerModal
         isOpen={isCategoryManagerOpen}
         onClose={() => setIsCategoryManagerOpen(false)}
         categories={categories}
-        onCategoryAdded={handleCategoryAdded}
-        onCategoryDeleted={handleCategoryDeleted}
+        onCategoryAdded={(newCat) => setCategories((prev) => [...prev, newCat])}
+        onCategoryDeleted={(catId) => setCategories((prev) => prev.filter((c) => c.id !== catId))}
       />
 
-      {/* Change Password Modal */}
       <PasswordChangeModal
         isOpen={isPasswordModalOpen}
         onClose={() => setIsPasswordModalOpen(false)}
       />
 
-      {/* Admin Login Modal */}
       <LoginModal />
     </div>
   );
@@ -584,4 +513,5 @@ export default function App() {
       </AuthProvider>
     </ToastProvider>
   );
-}
+        }
+        
