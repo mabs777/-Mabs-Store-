@@ -1,5 +1,5 @@
 import { handleUpload, type HandleUploadBody } from '@vercel/blob/client';
-import { parseRequestBody, sendJsonResponse, handleOptions, requireAdminAuth } from './_lib/auth.ts';
+import { parseRequestBody, sendJsonResponse, handleOptions, requireAdminAuth } from './_lib/auth.js';
 
 export default async function handler(req: any, res: any) {
   if (handleOptions(req, res)) return;
@@ -30,7 +30,6 @@ export default async function handler(req: any, res: any) {
       request: req,
       token: blobToken,
       onBeforeGenerateToken: async (pathname) => {
-        // Validate file type & extension
         const lower = pathname.toLowerCase();
         const isApk = lower.endsWith('.apk');
         const isImage = lower.endsWith('.png') || lower.endsWith('.jpg') || lower.endsWith('.jpeg') || lower.endsWith('.webp') || lower.endsWith('.svg') || lower.endsWith('.gif');
@@ -51,7 +50,7 @@ export default async function handler(req: any, res: any) {
             'image/svg+xml',
             'image/gif',
           ],
-          maximumSizeInBytes: isApk ? 500 * 1024 * 1024 : 10 * 1024 * 1024, // 500MB for APKs, 10MB for images
+          maximumSizeInBytes: isApk ? 500 * 1024 * 1024 : 10 * 1024 * 1024,
           addRandomSuffix: true,
         };
       },
