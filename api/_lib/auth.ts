@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'http';
-import { db } from './db.ts';
+import { db } from './db.js';
 
 export interface VercelReq extends IncomingMessage {
   query?: Record<string, string | string[]>;
@@ -130,7 +130,6 @@ export function requireAdminAuth(req: any, res: any): boolean {
 }
 
 export function extractSubpath(req: any, prefix: string): string {
-  // Check req.query.sub if passed via rewrite
   if (req.query?.sub) {
     const sub = Array.isArray(req.query.sub) ? req.query.sub.join('/') : req.query.sub;
     return sub.replace(/^\/+|\/+$/g, '');
